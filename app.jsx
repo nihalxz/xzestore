@@ -101,21 +101,64 @@ const App = () => {
             console.error("Local storage error:", e);
         }
 
+        // Load Products from Local Cache first (instant display, never blank)
+        const cachedProducts = localStorage.getItem("expoz_products_cache");
+        if (cachedProducts) {
+            try {
+                const parsed = JSON.parse(cachedProducts);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setProducts(parsed);
+                }
+            } catch (e) {
+                console.error("Cache read error:", e);
+            }
+        }
+
         // Load Products from Firebase Firestore Real-time
         const unsubscribe = db.collection('products')
-            .orderBy('createdAt', 'desc')
             .onSnapshot(
                 (snapshot) => {
                     const fetchedProducts = snapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
                     }));
+                    // Safely sort in-memory so products without createdAt are NOT dropped
+                    fetchedProducts.sort((a, b) => {
+                        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+                        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                        return tB - tA;
+                    });
                     setProducts(fetchedProducts);
+                    localStorage.setItem("expoz_products_cache", JSON.stringify(fetchedProducts));
                 },
                 (error) => {
                     console.error("Firebase fetch error:", error);
-                    showToast("Error connecting to database.");
-                    setProducts([]);
+                    // Keep cached products if available so store is not emptied
+                    const cached = localStorage.getItem("expoz_products_cache");
+                    if (cached) {
+                        try {
+                            const parsed = JSON.parse(cached);
+                            if (Array.isArray(parsed)) setProducts(parsed);
+                        } catch (e) {
+                            setProducts([]);
+                        }
+                    } else {
+                        setProducts([]);
+                    }
+
+                    if (error && (error.code === 'permission-denied' || (error.message && error.message.includes('permission')))) {
+                        showToast("Firebase Rules Expired! Please update rules in Firebase Console.");
+                        const errLog = document.getElementById('error-log');
+                        if (errLog) {
+                            errLog.innerHTML = `<div style="background:#fee2e2; border:1px solid #ef4444; color:#991b1b; padding:12px; border-radius:8px; margin:10px; font-size:14px; font-family:sans-serif;">
+                                ⚠️ <b>Firebase Firestore Security Rules Expired:</b><br/>
+                                നിങ്ങളുടെ ഫയർബേസ് ഡാറ്റാബേസിന്റെ 30 ദിവസത്തെ ടെസ്റ്റ് റൂളുകൾ എക്സ്പയർ ആയി. അതിനാൽ പുതിയ പ്രൊഡക്റ്റുകൾ സേവ് ആകുന്നില്ല, പഴയവ കാണുന്നില്ല.<br/>
+                                <b>പരിഹാരം:</b> Firebase Console തുറക്കുക &rarr; Firestore Database &rarr; <b>Rules</b> ടാബിൽ പോയി <code>allow read, write: if true;</code> എന്ന് മാറ്റി <b>Publish</b> ചെയ്യുക.
+                            </div>`;
+                        }
+                    } else {
+                        showToast("Error connecting to database.");
+                    }
                 }
             );
 
@@ -352,10 +395,54 @@ const App = () => {
                     description: newProduct.description,
                     category: newProduct.category || "Fashion"
                 });
+
+                // Update local cache
+                try {
+                    let cached = JSON.parse(localStorage.getItem("expoz_products_cache") || "[]");
+                    cached = cached.map(p => p.id === editingProductId ? {
+                        ...p,
+                        title: newProduct.title,
+                        price: newProduct.price,
+                        mrp: newProduct.mrp,
+                        image: newProduct.image,
+                        images: newProduct.images || [],
+                        description: newProduct.description,
+                        category: newProduct.category || "Fashion"
+                    } : p);
+                    localStorage.setItem("expoz_products_cache", JSON.stringify(cached));
+                    setProducts(cached);
+                } catch(e) {}
+
                 showToast("Product updated successfully!");
             } else {
                 // Add new product to Firestore
-                await db.collection('products').add({
+                let newId = 'prod_' + Date.now();
+                try {
+                    const docRef = await db.collection('products').add({
+                        title: newProduct.title,
+                        price: newProduct.price,
+                        mrp: newProduct.mrp,
+                        image: newProduct.image,
+                        images: newProduct.images || [],
+                        description: newProduct.description,
+                        category: newProduct.category || "Fashion",
+                        rating: 4.5,
+                        reviews: "0",
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    newId = docRef.id;
+                } catch (fsErr) {
+                    console.error("Firestore save error:", fsErr);
+                    if (fsErr && (fsErr.code === 'permission-denied' || (fsErr.message && fsErr.message.includes('permission')))) {
+                        alert("⚠️ Firebase Firestore Rules Expired!\n\nനിങ്ങളുടെ Firebase Console-ൽ Firestore Database -> Rules ടാബ് തുറന്ന്:\nallow read, write: if true;\nഎന്ന് നൽകി Publish ചെയ്യുക.\n\n(എങ്കിലും ഈ പ്രൊഡക്റ്റ് നഷ്ടപ്പെടാതെ താൽക്കാലികമായി സ്റ്റോറിൽ സേവ് ചെയ്തിട്ടുണ്ട്).");
+                    } else {
+                        throw fsErr;
+                    }
+                }
+
+                // Add to local cache so it immediately stays in store
+                const savedItem = {
+                    id: newId,
                     title: newProduct.title,
                     price: newProduct.price,
                     mrp: newProduct.mrp,
@@ -365,8 +452,14 @@ const App = () => {
                     category: newProduct.category || "Fashion",
                     rating: 4.5,
                     reviews: "0",
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                    createdAt: new Date().toISOString()
+                };
+                let cached = [];
+                try { cached = JSON.parse(localStorage.getItem("expoz_products_cache") || "[]"); } catch(e){}
+                cached.unshift(savedItem);
+                localStorage.setItem("expoz_products_cache", JSON.stringify(cached));
+                setProducts([...cached]);
+
                 showToast("Product published to database!");
             }
 
@@ -400,8 +493,15 @@ const App = () => {
     const handleDeleteProduct = async (id) => {
         if (!window.confirm("Are you sure you want to delete this product?")) return;
         try {
-            await db.collection('products').doc(id).delete();
-            showToast("Product deleted from database!");
+            await db.collection('products').doc(id).delete().catch(e => console.warn(e));
+            // Remove from local cache
+            try {
+                let cached = JSON.parse(localStorage.getItem("expoz_products_cache") || "[]");
+                cached = cached.filter(p => p.id !== id);
+                localStorage.setItem("expoz_products_cache", JSON.stringify(cached));
+                setProducts(cached);
+            } catch(e) {}
+            showToast("Product deleted!");
         } catch (error) {
             console.error("Error deleting product:", error);
             showToast("Failed to delete product.");
@@ -711,6 +811,16 @@ const App = () => {
 
             // 1. Save order to Firestore (Fire and forget to avoid UI lag)
             firebase.firestore().collection('orders').doc(generatedId).set(orderData).catch(e => console.error(e));
+            
+            // 1.5 Save order to local cache so My Orders always has it
+            try {
+                let userOrders = JSON.parse(localStorage.getItem(`expoz_orders_${checkoutEmail}`) || "[]");
+                userOrders.unshift({
+                    ...orderData,
+                    timestamp: new Date().toISOString()
+                });
+                localStorage.setItem(`expoz_orders_${checkoutEmail}`, JSON.stringify(userOrders));
+            } catch(e) {}
             
             // 2. Send data to Google Sheets via Apps Script Web App (Fire and forget)
             fetch("https://script.google.com/macros/s/AKfycbwpPGzU_hDD3vN_lkrbc8_m6SAJ5_HCxGowzHczg_ZDjIJWPMw8T7gKPr1VTOtGTxAU/exec", {
@@ -1900,28 +2010,34 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
         if (!currentUser) return;
         
         const fetchOrders = async () => {
+            let localOrders = [];
+            try {
+                localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${currentUser.email}`) || '[]');
+                if (Array.isArray(localOrders) && localOrders.length > 0) setOrders(localOrders);
+            } catch(e){}
+
             try {
                 const snapshot = await firebase.firestore().collection('orders')
                     .where('email', '==', currentUser.email)
-                    .orderBy('timestamp', 'desc')
                     .get();
                 
                 const fetchedOrders = [];
                 snapshot.forEach(doc => {
                     fetchedOrders.push({ id: doc.id, ...doc.data() });
                 });
+
+                fetchedOrders.sort((a, b) => {
+                    const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+                    const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+                    return tB - tA;
+                });
+
                 setOrders(fetchedOrders);
+                localStorage.setItem(`expoz_orders_${currentUser.email}`, JSON.stringify(fetchedOrders));
             } catch (err) {
                 console.error("Error fetching orders:", err);
-                if (err.message && err.message.includes('index')) {
-                    const fallbackSnapshot = await firebase.firestore().collection('orders')
-                        .where('email', '==', currentUser.email)
-                        .get();
-                    const fetchedOrders = [];
-                    fallbackSnapshot.forEach(doc => {
-                        fetchedOrders.push({ id: doc.id, ...doc.data() });
-                    });
-                    setOrders(fetchedOrders);
+                if (localOrders.length > 0) {
+                    setOrders(localOrders);
                 } else {
                     setOrders([]);
                 }
