@@ -314,6 +314,17 @@ const App = () => {
                 ...reviewData,
                 timestamp: { toDate: () => new Date() }
             }, ...(productReviews || [])]);
+
+            // Increment review count on product
+            const currentRatingData = getProductRatingData(selectedProduct);
+            const newReviewsCount = Number(currentRatingData.reviews) + 1;
+            db.collection('products').doc(selectedProduct.id).update({
+                reviews: String(newReviewsCount)
+            }).catch(e => console.warn(e));
+
+            // Update in local products state
+            setProducts(prev => prev ? prev.map(p => p.id === selectedProduct.id ? { ...p, reviews: String(newReviewsCount) } : p) : prev);
+            setSelectedProduct(prev => prev ? { ...prev, reviews: String(newReviewsCount) } : prev);
             
             showToast("Review submitted successfully!");
             setNewReview({ rating: 0, comment: "", photos: [], userName: "" });
@@ -1228,6 +1239,43 @@ const App = () => {
         </div>
     );
 
+    // Helper to get consistent realistic rating and review count for products
+    const getProductRatingData = (prod) => {
+        if (!prod) return { rating: "4.5", reviews: 128 };
+        let idHash = 0;
+        const str = String(prod.id || prod.title || "product");
+        for (let i = 0; i < str.length; i++) {
+            idHash = (idHash * 31 + str.charCodeAt(i)) % 1000;
+        }
+        const defaultReviews = 50 + (Math.abs(idHash) % 150); // e.g. 50 to 199
+        const defaultRating = (4.2 + ((Math.abs(idHash) % 6) * 0.1)).toFixed(1); // 4.2 to 4.7
+
+        const reviews = (prod.reviews && prod.reviews !== "0" && prod.reviews !== 0) 
+            ? prod.reviews 
+            : defaultReviews;
+            
+        const rating = (prod.rating && prod.rating !== 0 && prod.rating !== "0") 
+            ? String(prod.rating) 
+            : defaultRating;
+
+        return { rating, reviews };
+    };
+
+    const renderStarIcons = (rating, size = 14) => {
+        const num = parseFloat(rating) || 0;
+        const stars = [];
+        for (let i = 1; i <= 5; i++) {
+            if (i <= num) {
+                stars.push(<Icon key={i} name="star" size={size} fill="currentColor" stroke="currentColor" />);
+            } else if (i - 0.5 <= num) {
+                stars.push(<Icon key={i} name="star-half" size={size} fill="currentColor" stroke="currentColor" />);
+            } else {
+                stars.push(<Icon key={i} name="star" size={size} fill="none" stroke="currentColor" />);
+            }
+        }
+        return stars;
+    };
+
     const renderStore = () => {
         const displayedProducts = (products || []).filter(p => selectedCategory === 'All' || p.category === selectedCategory);
         
@@ -1278,6 +1326,7 @@ const App = () => {
                             const mrpVal = parseInt((prod.mrp || "0").replace(/[^0-9]/g, ''));
                             const hasDiscount = mrpVal > priceVal;
                             const discountPercent = hasDiscount ? Math.round(((mrpVal - priceVal) / mrpVal) * 100) : 0;
+                            const ratingData = getProductRatingData(prod);
                             
                             return (
                             <div className="product-card" key={prod.id} onClick={() => {
@@ -1292,14 +1341,11 @@ const App = () => {
                                 <div className="card-body">
                                     <h3 className="card-title">{prod.title}</h3>
                                     <div className="card-rating">
-                                        <div style={{display: 'flex', color: 'var(--star-color)'}}>
-                                            <Icon name="star" size="14" fill="currentColor" />
-                                            <Icon name="star" size="14" fill="currentColor" />
-                                            <Icon name="star" size="14" fill="currentColor" />
-                                            <Icon name="star" size="14" fill="currentColor" />
-                                            <Icon name="star-half" size="14" fill="currentColor" />
+                                        <div style={{display: 'flex', color: 'var(--star-color)', marginRight: '4px'}}>
+                                            {renderStarIcons(ratingData.rating, 13)}
                                         </div>
-                                        <span className="rating-count">({prod.reviews})</span>
+                                        <span style={{fontWeight: '600', fontSize: '0.8rem', color: 'var(--text-primary)'}}>{ratingData.rating}</span>
+                                        <span className="rating-count">({ratingData.reviews})</span>
                                     </div>
                                     <div className="price-container">
                                         <span className="card-price">{prod.price}</span>
@@ -1320,15 +1366,22 @@ const App = () => {
     const renderProductDetail = () => {
         if (!selectedProduct) return null;
         
-        const baseCount = 128;
-        const baseRating = 4.5;
+        const ratingData = getProductRatingData(selectedProduct);
+        const baseCount = Number(ratingData.reviews) || 128;
+        const baseRating = parseFloat(ratingData.rating) || 4.5;
         const realTotalRating = productReviews ? productReviews.reduce((sum, r) => sum + r.rating, 0) : 0;
         const realCount = productReviews ? productReviews.length : 0;
         
         const reviewCount = baseCount + realCount;
         const avgRating = (((baseRating * baseCount) + realTotalRating) / reviewCount).toFixed(1);
         
-        const ratingDistribution = { 5: 85, 4: 28, 3: 10, 2: 3, 1: 2 };
+        const ratingDistribution = {
+            5: Math.round(reviewCount * 0.65),
+            4: Math.round(reviewCount * 0.22),
+            3: Math.round(reviewCount * 0.08),
+            2: Math.round(reviewCount * 0.03),
+            1: Math.round(reviewCount * 0.02)
+        };
         if (productReviews) {
             productReviews.forEach(r => {
                 const ratingStr = String(r.rating);
@@ -1337,21 +1390,9 @@ const App = () => {
                 }
             });
         }
-        const totalReviewsText = 42 + realCount;
+        const totalReviewsText = Math.round(reviewCount * 0.35) + realCount;
         
-        const renderStars = (rating) => {
-            const stars = [];
-            for (let i = 1; i <= 5; i++) {
-                if (i <= rating) {
-                    stars.push(<Icon key={i} name="star" size="16" fill="currentColor" />);
-                } else if (i - 0.5 <= rating) {
-                    stars.push(<Icon key={i} name="star-half" size="16" fill="currentColor" />);
-                } else {
-                    stars.push(<Icon key={i} name="star" size="16" fill="none" stroke="currentColor" />);
-                }
-            }
-            return stars;
-        };
+        const renderStars = (rating) => renderStarIcons(rating, 16);
 
         return (
             <div className="animate-fade-in">
