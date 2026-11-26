@@ -118,6 +118,8 @@ const App = () => {
     const [newReview, setNewReview] = useState({ rating: 0, comment: "", photos: [], userName: "" });
     const [hoverRating, setHoverRating] = useState(0);
     const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+    const [isCheckingReviewEligibility, setIsCheckingReviewEligibility] = useState(false);
+    const [reviewBlockedModal, setReviewBlockedModal] = useState(false);
     const [orderId, setOrderId] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -396,6 +398,92 @@ const App = () => {
         });
     };
 
+    // Verified Buyer Check for Reviews
+    const handleOpenAddReview = async () => {
+        if (!selectedProduct) return;
+
+        // 1. If not logged in, prompt user to login
+        if (!currentUser || !currentUser.email) {
+            showToast("Please log in with the email used during checkout to write a review");
+            setCurrentView('login');
+            return;
+        }
+
+        // Admin can always review for testing
+        if (currentUser.role === 'admin') {
+            setCurrentView('add_review');
+            return;
+        }
+
+        setIsCheckingReviewEligibility(true);
+        try {
+            const userEmail = currentUser.email.toLowerCase().trim();
+            const prodId = String(selectedProduct.id);
+            const prodTitle = selectedProduct.title ? selectedProduct.title.toLowerCase().trim() : '';
+
+            // Check 1: LocalStorage purchased list
+            let hasPurchased = false;
+            try {
+                const purchasedList = JSON.parse(localStorage.getItem(`expoz_purchased_${userEmail}`) || '[]');
+                if (purchasedList.includes(prodId)) {
+                    hasPurchased = true;
+                }
+            } catch(e) {}
+
+            // Check 2: LocalStorage orders list
+            if (!hasPurchased) {
+                try {
+                    const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
+                    const found = localOrders.find(ord => {
+                        const status = (ord.status || '').toLowerCase();
+                        if (status.includes('cancel') || status.includes('return')) return false;
+                        if (ord.productIds && ord.productIds.includes(prodId)) return true;
+                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) return true;
+                        return false;
+                    });
+                    if (found) hasPurchased = true;
+                } catch(e) {}
+            }
+
+            // Check 3: Firestore orders collection
+            if (!hasPurchased) {
+                const snap = await db.collection('orders')
+                    .where('email', '==', userEmail)
+                    .get();
+
+                snap.forEach(doc => {
+                    const ord = doc.data();
+                    const status = (ord.status || '').toLowerCase();
+                    if (!status.includes('cancel') && !status.includes('return')) {
+                        if (ord.productIds && ord.productIds.includes(prodId)) hasPurchased = true;
+                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) hasPurchased = true;
+                    }
+                });
+            }
+
+            if (hasPurchased) {
+                // Cache purchase flag for fast future checks
+                try {
+                    const purchasedKey = `expoz_purchased_${userEmail}`;
+                    const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                    if (!existing.includes(prodId)) {
+                        existing.push(prodId);
+                        localStorage.setItem(purchasedKey, JSON.stringify(existing));
+                    }
+                } catch(e) {}
+
+                setCurrentView('add_review');
+            } else {
+                setReviewBlockedModal(true);
+            }
+        } catch(err) {
+            console.error("Error verifying purchase:", err);
+            setReviewBlockedModal(true);
+        } finally {
+            setIsCheckingReviewEligibility(false);
+        }
+    };
+
     const handleSubmitReview = async (e) => {
         e.preventDefault();
         
@@ -418,6 +506,38 @@ const App = () => {
             showToast("Please write a comment");
             return;
         }
+
+        // Enforce verified buyer check on submit
+        if (currentUser && currentUser.role !== 'admin') {
+            const userEmail = currentUser.email.toLowerCase().trim();
+            const prodId = String(selectedProduct.id);
+            const purchasedKey = `expoz_purchased_${userEmail}`;
+            let verified = false;
+            try {
+                const list = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                if (list.includes(prodId)) verified = true;
+            } catch(e) {}
+
+            if (!verified) {
+                try {
+                    const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
+                    const found = localOrders.find(ord => {
+                        const status = (ord.status || '').toLowerCase();
+                        if (status.includes('cancel') || status.includes('return')) return false;
+                        if (ord.productIds && ord.productIds.includes(prodId)) return true;
+                        if (ord.products && ord.products.toLowerCase().includes(selectedProduct.title.toLowerCase().trim())) return true;
+                        return false;
+                    });
+                    if (found) verified = true;
+                } catch(e) {}
+            }
+
+            if (!verified) {
+                showToast("Only verified buyers can submit reviews.");
+                setReviewBlockedModal(true);
+                return;
+            }
+        }
         
         setIsSubmittingReview(true);
         try {
@@ -428,6 +548,7 @@ const App = () => {
                 rating: newReview.rating,
                 comment: newReview.comment,
                 photos: newReview.photos,
+                verifiedPurchase: true,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -949,6 +1070,7 @@ const App = () => {
             email: checkoutEmail,
             address: fullAddress,
             products: itemsToCheckout.map(i => `${i.title} (x${i.qty})`).join(', '),
+            productIds: itemsToCheckout.map(i => String(i.id)),
             total: orderTotal,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             status: "Pending"
@@ -998,6 +1120,13 @@ const App = () => {
                     timestamp: new Date().toISOString()
                 });
                 localStorage.setItem(`expoz_orders_${checkoutEmail}`, JSON.stringify(userOrders));
+
+                // Save purchased products for verified reviews
+                const purchasedKey = `expoz_purchased_${checkoutEmail.toLowerCase().trim()}`;
+                const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                const newIds = itemsToCheckout.map(i => String(i.id));
+                const merged = Array.from(new Set([...existing, ...newIds]));
+                localStorage.setItem(purchasedKey, JSON.stringify(merged));
             } catch(e) {}
             
             // 2. Send data to Google Sheets via Apps Script Web App (Fire and forget)
@@ -1804,15 +1933,20 @@ const App = () => {
                                         const rName = review.userName || "Customer";
                                         return (
                                         <div key={review.id} className="review-card">
-                                            <div className="review-header" style={{justifyContent: 'flex-start', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem'}}>
+                                            <div className="review-header" style={{justifyContent: 'flex-start', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap'}}>
                                                 <div className="review-avatar" style={{background: 'var(--accent-light)', color: 'var(--accent-color)'}}>
                                                     {rName.charAt(0).toUpperCase()}
                                                 </div>
                                                 <div className="review-user" style={{color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600', marginBottom: '0'}}>{rName}</div>
+                                                {review.verifiedPurchase !== false && (
+                                                    <span style={{display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#059669', fontSize: '0.72rem', fontWeight: '600', background: '#ecfdf5', padding: '2px 6px', borderRadius: '4px', border: '1px solid #a7f3d0'}}>
+                                                        <Icon name="check-circle" size={11} stroke="#059669" /> Verified Buyer
+                                                    </span>
+                                                )}
                                             </div>
                                             <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem'}}>
                                                 <span style={{background: '#059669', color: 'white', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '2px'}}>
-                                                    {review.rating}.0 <Icon name="star" size="10" fill="currentColor" />
+                                                    {review.rating}.0 <Icon name="star" size={10} fill="currentColor" />
                                                 </span>
                                                 <span className="review-date" style={{fontSize: '0.8rem', color: '#9ca3af'}}>
                                                     • Posted on {review.timestamp && review.timestamp.toDate ? review.timestamp.toDate().toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'}) : 'Just now'}
@@ -1827,7 +1961,7 @@ const App = () => {
                                                 </div>
                                             )}
                                             <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#6b7280', fontSize: '0.9rem', cursor: 'pointer', marginTop: '0.5rem'}}>
-                                                <Icon name="thumbs-up" size="16" /> Helpful ({review.helpfulCount || Math.floor(Math.random() * 50) + 1})
+                                                <Icon name="thumbs-up" size={16} /> Helpful ({review.helpfulCount || Math.floor(Math.random() * 50) + 1})
                                             </div>
                                         </div>
                                     )})}
@@ -1836,8 +1970,33 @@ const App = () => {
                             
                             {/* Add Review Button */}
                             <div style={{marginTop: '1.5rem', textAlign: 'center'}}>
-                                <button className="btn-auth" style={{width: 'auto', padding: '0.75rem 2rem', background: 'white', color: 'var(--primary-color)', border: '1px solid var(--primary-color)', fontWeight: '600'}} onClick={() => currentUser ? setCurrentView('add_review') : setCurrentView('login')}>
-                                    Write a Review
+                                <button 
+                                    className="btn-auth" 
+                                    style={{
+                                        width: 'auto', 
+                                        padding: '0.75rem 2rem', 
+                                        background: 'white', 
+                                        color: 'var(--accent-color)', 
+                                        border: '1.5px solid var(--accent-color)', 
+                                        fontWeight: '600',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '8px'
+                                    }} 
+                                    onClick={handleOpenAddReview}
+                                    disabled={isCheckingReviewEligibility}
+                                >
+                                    {isCheckingReviewEligibility ? (
+                                        <>
+                                            <Icon name="loader" size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                                            Verifying Purchase...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Icon name="edit-3" size={16} />
+                                            Write a Review
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -2296,6 +2455,84 @@ const App = () => {
                     order={selectedReceiptOrder} 
                     onClose={() => setSelectedReceiptOrder(null)} 
                 />
+            )}
+
+            {reviewBlockedModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.65)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 99999,
+                    padding: '1.25rem'
+                }}>
+                    <div style={{
+                        background: 'white',
+                        borderRadius: '16px',
+                        padding: '2rem 1.5rem',
+                        maxWidth: '380px',
+                        width: '100%',
+                        textAlign: 'center',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                        animation: 'fadeIn 0.2s ease forwards'
+                    }}>
+                        <div style={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '50%',
+                            background: '#fee2e2',
+                            color: '#ef4444',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 1.25rem auto'
+                        }}>
+                            <Icon name="shield-alert" size={30} />
+                        </div>
+                        
+                        <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.6rem' }}>
+                            Verified Buyers Only
+                        </h3>
+                        
+                        <p style={{ fontSize: '0.9rem', color: '#64748b', lineHeight: '1.5', marginBottom: '1.5rem' }}>
+                            വ്യാജ റിവ്യൂകൾ ഒഴിവാക്കാൻ, ഈ പ്രൊഡക്റ്റ് വാങ്ങിയ കസ്റ്റമേഴ്സിന് മാത്രമേ റിവ്യൂ എഴുതാൻ സാധിക്കുകയുള്ളൂ.
+                        </p>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                            <button
+                                className="btn btn-buy"
+                                style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', fontSize: '0.95rem' }}
+                                onClick={() => {
+                                    setReviewBlockedModal(false);
+                                    if (selectedProduct) handleBuyNow(selectedProduct);
+                                }}
+                            >
+                                <Icon name="zap" size={16} /> Buy This Product
+                            </button>
+                            <button
+                                style={{
+                                    width: '100%',
+                                    padding: '0.7rem',
+                                    background: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '10px',
+                                    color: '#475569',
+                                    fontWeight: '600',
+                                    fontSize: '0.9rem',
+                                    cursor: 'pointer'
+                                }}
+                                onClick={() => setReviewBlockedModal(false)}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
