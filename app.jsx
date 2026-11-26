@@ -204,6 +204,65 @@ const App = () => {
         }
     }, [currentView, cart.length, toastMsg, products, currentUser, isMenuOpen]);
 
+    // Deep-link: Automatically open product if ?product=ID is present in URL
+    useEffect(() => {
+        if (!products || products.length === 0) return;
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const prodId = params.get('product');
+            if (prodId) {
+                const found = products.find(p => String(p.id) === String(prodId));
+                if (found) {
+                    setSelectedProduct(found);
+                    setCurrentView('product');
+                    window.scrollTo(0, 0);
+                }
+            }
+        } catch(e) {
+            console.error("Deep link error:", e);
+        }
+    }, [products]);
+
+    // Synchronize URL with current view & selectedProduct
+    useEffect(() => {
+        try {
+            const url = new URL(window.location.href);
+            if (currentView === 'product' && selectedProduct) {
+                if (url.searchParams.get('product') !== String(selectedProduct.id)) {
+                    url.searchParams.set('product', selectedProduct.id);
+                    window.history.pushState({ productId: selectedProduct.id }, '', url.toString());
+                }
+            } else if (currentView !== 'product' && url.searchParams.has('product')) {
+                url.searchParams.delete('product');
+                window.history.pushState({}, '', url.toString());
+            }
+        } catch(e) {}
+    }, [currentView, selectedProduct]);
+
+    // Handle browser Back/Forward navigation
+    useEffect(() => {
+        const handlePopState = () => {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const prodId = params.get('product');
+                if (prodId && products && products.length > 0) {
+                    const found = products.find(p => String(p.id) === String(prodId));
+                    if (found) {
+                        setSelectedProduct(found);
+                        setCurrentView('product');
+                        return;
+                    }
+                }
+                if (!prodId && currentView === 'product') {
+                    setSelectedProduct(null);
+                    setCurrentView('store');
+                }
+            } catch(e) {}
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [products, currentView]);
+
     // Load Admin Orders when tab changes
     useEffect(() => {
         if (currentUser && currentUser.role === 'admin' && adminViewTab === 'orders') {
@@ -716,6 +775,49 @@ const App = () => {
         setCheckoutMode('cart');
         setCurrentView("checkout");
         window.scrollTo(0, 0);
+    };
+
+    // ---- Product Sharing Logic ----
+    const handleShareProduct = (prodToShare = selectedProduct) => {
+        if (!prodToShare) return;
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('product', prodToShare.id);
+            const shareUrl = url.toString();
+            const shareTitle = prodToShare.title || "xzestore Product";
+            const shareText = `Check out ${prodToShare.title} on xzestore! Only ${prodToShare.price}`;
+
+            if (navigator.share) {
+                navigator.share({
+                    title: shareTitle,
+                    text: shareText,
+                    url: shareUrl
+                }).catch(() => {});
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    showToast("Product link copied to clipboard!");
+                }).catch(() => {
+                    prompt("Copy product link:", shareUrl);
+                });
+            } else {
+                prompt("Copy product link:", shareUrl);
+            }
+        } catch(e) {
+            console.error("Share error:", e);
+        }
+    };
+
+    const handleWhatsAppShare = (prodToShare = selectedProduct) => {
+        if (!prodToShare) return;
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('product', prodToShare.id);
+            const shareUrl = url.toString();
+            const waText = encodeURIComponent(`*${prodToShare.title}*\nPrice: ${prodToShare.price}\n\nView & Order here:\n${shareUrl}`);
+            window.open(`https://api.whatsapp.com/send?text=${waText}`, '_blank');
+        } catch(e) {
+            console.error("WhatsApp share error:", e);
+        }
     };
 
     // ---- Order Logic ----
@@ -1335,8 +1437,35 @@ const App = () => {
                                 window.scrollTo(0,0);
                             }}>
                                 {hasDiscount && <span className="badge-sale">-{discountPercent}%</span>}
-                                <div className="card-img-container">
+                                <div className="card-img-container" style={{ position: 'relative' }}>
                                     <img src={prod.image} alt={prod.title} className="card-img" />
+                                    <button 
+                                        type="button"
+                                        title="Share Product"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleShareProduct(prod);
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            top: '8px',
+                                            right: '8px',
+                                            background: 'rgba(255, 255, 255, 0.92)',
+                                            border: 'none',
+                                            borderRadius: '50%',
+                                            width: '32px',
+                                            height: '32px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                                            zIndex: 3,
+                                            color: '#1e293b'
+                                        }}
+                                    >
+                                        <Icon name="share-2" size={15} />
+                                    </button>
                                 </div>
                                 <div className="card-body">
                                     <h3 className="card-title">{prod.title}</h3>
@@ -1440,7 +1569,49 @@ const App = () => {
                         </div>
                     </div>
                     <div className="product-details">
-                        <h1 className="product-title-large">{selectedProduct.title}</h1>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.35rem' }}>
+                            <h1 className="product-title-large" style={{ margin: 0, flex: 1 }}>{selectedProduct.title}</h1>
+                            <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                                <button 
+                                    onClick={() => handleShareProduct(selectedProduct)} 
+                                    title="Share Product Link"
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        background: '#f1f5f9',
+                                        border: '1px solid #cbd5e1',
+                                        padding: '7px 12px',
+                                        borderRadius: '20px',
+                                        cursor: 'pointer',
+                                        color: '#334155',
+                                        fontWeight: '600',
+                                        fontSize: '0.8rem'
+                                    }}
+                                >
+                                    <Icon name="share-2" size={15} /> Share
+                                </button>
+                                <button 
+                                    onClick={() => handleWhatsAppShare(selectedProduct)} 
+                                    title="Share on WhatsApp"
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        background: '#25D366',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        padding: '7px 12px',
+                                        borderRadius: '20px',
+                                        cursor: 'pointer',
+                                        fontWeight: '600',
+                                        fontSize: '0.8rem'
+                                    }}
+                                >
+                                    <Icon name="message-circle" size={15} /> WhatsApp
+                                </button>
+                            </div>
+                        </div>
                         <div className="card-rating" style={{fontSize: '0.85rem', padding: '0.2rem 0'}}>
                             <div style={{display: 'flex', color: 'var(--star-color)', alignItems: 'center', gap: '4px'}}>
                                 {avgRating > 0 && <span style={{fontWeight: 'bold', fontSize: '1rem', color: '#111827'}}>{avgRating}</span>}
