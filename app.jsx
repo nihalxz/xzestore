@@ -104,7 +104,7 @@ const App = () => {
     const [authPassword, setAuthPassword] = useState("");
 
     const [newProduct, setNewProduct] = useState({
-        title: "", price: "", mrp: "", image: "", images: [], description: "", category: "Fashion"
+        title: "", price: "", mrp: "", wholesalePrice: "", image: "", images: [], description: "", category: "Fashion"
     });
     const [editingProductId, setEditingProductId] = useState(null);
     const [isSavingProduct, setIsSavingProduct] = useState(false);
@@ -332,7 +332,7 @@ const App = () => {
 
     // Load Admin Orders when tab changes
     useEffect(() => {
-        if (currentUser && currentUser.role === 'admin' && adminViewTab === 'orders') {
+        if (currentUser && currentUser.role === 'admin' && (adminViewTab === 'orders' || adminViewTab === 'income')) {
             const unsubscribe = db.collection('orders')
                 .orderBy('timestamp', 'desc')
                 .onSnapshot(
@@ -702,6 +702,7 @@ const App = () => {
                     title: newProduct.title,
                     price: newProduct.price,
                     mrp: newProduct.mrp,
+                    wholesalePrice: newProduct.wholesalePrice || "",
                     image: newProduct.image,
                     images: newProduct.images || [],
                     description: newProduct.description,
@@ -716,6 +717,7 @@ const App = () => {
                         title: newProduct.title,
                         price: newProduct.price,
                         mrp: newProduct.mrp,
+                        wholesalePrice: newProduct.wholesalePrice || "",
                         image: newProduct.image,
                         images: newProduct.images || [],
                         description: newProduct.description,
@@ -734,6 +736,7 @@ const App = () => {
                         title: newProduct.title,
                         price: newProduct.price,
                         mrp: newProduct.mrp,
+                        wholesalePrice: newProduct.wholesalePrice || "",
                         image: newProduct.image,
                         images: newProduct.images || [],
                         description: newProduct.description,
@@ -758,6 +761,7 @@ const App = () => {
                     title: newProduct.title,
                     price: newProduct.price,
                     mrp: newProduct.mrp,
+                    wholesalePrice: newProduct.wholesalePrice || "",
                     image: newProduct.image,
                     images: newProduct.images || [],
                     description: newProduct.description,
@@ -775,7 +779,7 @@ const App = () => {
                 showToast("Product published to database!");
             }
 
-            setNewProduct({ title: "", price: "", mrp: "", image: "", images: [], description: "", category: "Fashion" });
+            setNewProduct({ title: "", price: "", mrp: "", wholesalePrice: "", image: "", images: [], description: "", category: "Fashion" });
             setEditingProductId(null);
 
             const fileInput = document.getElementById('image-upload-input');
@@ -793,6 +797,7 @@ const App = () => {
             title: prod.title,
             price: prod.price,
             mrp: prod.mrp || "",
+            wholesalePrice: prod.wholesalePrice || "",
             image: prod.image,
             images: prod.images || (prod.image ? [prod.image] : []),
             description: prod.description || "",
@@ -1399,6 +1404,11 @@ const App = () => {
                         onClick={() => setAdminViewTab('orders')}>
                         Orders
                     </button>
+                    <button
+                        style={{padding: '0.5rem 1rem', border: 'none', background: adminViewTab === 'income' ? '#059669' : 'transparent', color: adminViewTab === 'income' ? 'white' : 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem'}}
+                        onClick={() => setAdminViewTab('income')}>
+                        <Icon name="trending-up" size={16} /> Income & Margin
+                    </button>
                 </div>
             </div>
 
@@ -1425,18 +1435,53 @@ const App = () => {
                                     <option value="Others">Others</option>
                                 </select>
                             </div>
-                            <div className="form-grid">
+                            <div className="form-grid" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))'}}>
                                 <div className="form-group">
                                     <label className="form-label">Selling Price (₹)</label>
-                                    <input type="text" className="form-input" required placeholder="e.g. ₹500"
+                                    <input type="text" className="form-input" required placeholder="e.g. 500"
                                         value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} />
                                 </div>
                                 <div className="form-group">
+                                    <label className="form-label">Wholesale / Cost (₹)</label>
+                                    <input type="text" className="form-input" placeholder="e.g. 350"
+                                        value={newProduct.wholesalePrice || ""} onChange={e => setNewProduct({...newProduct, wholesalePrice: e.target.value})} />
+                                </div>
+                                <div className="form-group">
                                     <label className="form-label">MRP (₹)</label>
-                                    <input type="text" className="form-input" placeholder="e.g. ₹999"
+                                    <input type="text" className="form-input" placeholder="e.g. 999"
                                         value={newProduct.mrp} onChange={e => setNewProduct({...newProduct, mrp: e.target.value})} />
                                 </div>
                             </div>
+                            {(() => {
+                                const sPrice = parseFloat(String(newProduct.price || '').replace(/[^0-9.]/g, '')) || 0;
+                                const wPrice = parseFloat(String(newProduct.wholesalePrice || '').replace(/[^0-9.]/g, '')) || 0;
+                                if (sPrice > 0 && wPrice > 0) {
+                                    const margin = sPrice - wPrice;
+                                    const marginPct = ((margin / sPrice) * 100).toFixed(1);
+                                    const isProfit = margin >= 0;
+                                    return (
+                                        <div style={{
+                                            background: isProfit ? '#ecfdf5' : '#fef2f2',
+                                            border: '1px solid ' + (isProfit ? '#a7f3d0' : '#fecaca'),
+                                            borderRadius: 'var(--radius-sm)',
+                                            padding: '0.65rem 0.9rem',
+                                            marginBottom: '1rem',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            fontSize: '0.85rem'
+                                        }}>
+                                            <div style={{color: isProfit ? '#065f46' : '#991b1b', fontWeight: '600'}}>
+                                                Expected Margin (Profit per piece):
+                                            </div>
+                                            <div style={{color: isProfit ? '#059669' : '#dc2626', fontWeight: '700', fontSize: '0.95rem'}}>
+                                                ₹{margin.toFixed(2)} ({marginPct}%)
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
                             <div className="form-group">
                                 <label className="form-label">Product Images (Select multiple from Gallery)</label>
                                 <input type="file" id="image-upload-input" accept="image/*" multiple className="form-input" style={{padding: '0.5rem'}} required={(!newProduct.images || newProduct.images.length === 0) && !newProduct.image} onChange={handleImageUpload} />
@@ -1473,7 +1518,7 @@ const App = () => {
                                 </button>
                                 {editingProductId && (
                                     <button type="button" className="btn-auth" style={{marginTop: 0, flex: 1, background: 'var(--border-color)', color: 'var(--text-primary)'}} onClick={() => {
-                                        setNewProduct({ title: "", price: "", mrp: "", image: "", images: [], description: "", category: "Fashion" });
+                                        setNewProduct({ title: "", price: "", mrp: "", wholesalePrice: "", image: "", images: [], description: "", category: "Fashion" });
                                         setEditingProductId(null);
                                         const fileInput = document.getElementById('image-upload-input');
                                         if (fileInput) fileInput.value = '';
@@ -1502,7 +1547,32 @@ const App = () => {
                                         <img src={prod.image} className="admin-product-img" alt={prod.title} />
                                         <div className="admin-product-info">
                                             <div style={{fontWeight: '500', fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden'}}>{prod.title}</div>
-                                            <div style={{color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '600'}}>{prod.price}</div>
+                                            <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap'}}>
+                                                <span style={{color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '600'}}>Sell: {prod.price}</span>
+                                                {prod.wholesalePrice && (
+                                                    <span style={{color: 'var(--text-secondary)', fontSize: '0.8rem'}}>Cost: ₹{prod.wholesalePrice}</span>
+                                                )}
+                                                {(() => {
+                                                    const sp = parseFloat(String(prod.price || '').replace(/[^0-9.]/g, '')) || 0;
+                                                    const wp = parseFloat(String(prod.wholesalePrice || '').replace(/[^0-9.]/g, '')) || 0;
+                                                    if (sp > 0 && wp > 0) {
+                                                        const m = sp - wp;
+                                                        return (
+                                                            <span style={{
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: '700',
+                                                                color: m >= 0 ? '#059669' : '#dc2626',
+                                                                background: m >= 0 ? '#ecfdf5' : '#fef2f2',
+                                                                padding: '1px 6px',
+                                                                borderRadius: '4px'
+                                                            }}>
+                                                                Margin: ₹{m.toFixed(0)}
+                                                            </span>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
+                                            </div>
                                         </div>
                                         <div className="admin-product-actions">
                                             <button className="btn-icon" onClick={() => handleEditProduct(prod)} title="Edit Product">
@@ -1518,7 +1588,7 @@ const App = () => {
                         </div>
                     </div>
                 </>
-            ) : (
+            ) : adminViewTab === 'orders' ? (
                 <div style={{gridColumn: '1 / -1', background: 'var(--card-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', padding: '1.5rem'}}>
                     <div className="admin-header" style={{flexDirection: 'column', alignItems: 'flex-start', gap: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1.5rem'}}>
                         <h2 className="admin-title">
@@ -1595,6 +1665,291 @@ const App = () => {
                             ))
                         )}
                     </div>
+                </div>
+            ) : (
+                /* INCOME & MARGIN TAB */
+                <div style={{gridColumn: '1 / -1', background: 'var(--card-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', padding: '1.5rem'}}>
+                    <div className="admin-header" style={{borderBottom: '1px solid var(--border-color)', paddingBottom: '1.25rem', marginBottom: '1.5rem'}}>
+                        <div>
+                            <h2 className="admin-title" style={{color: '#059669', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                <Icon name="wallet" size={24} /> Financials & Margin Analytics
+                            </h2>
+                            <p style={{fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0 0'}}>
+                                Confidential resale profit overview (Visible only to Admin)
+                            </p>
+                        </div>
+                    </div>
+
+                    {(() => {
+                        if (!allOrders) {
+                            return <div style={{textAlign: 'center', padding: '3rem 0', color: 'var(--text-secondary)'}}>Loading analytics...</div>;
+                        }
+
+                        let totalGrossSales = 0;
+                        let totalWholesaleCost = 0;
+                        let totalEstimatedMargin = 0;
+                        let validOrdersCount = 0;
+                        let deliveredProfit = 0;
+                        let deliveredSales = 0;
+
+                        const enrichedOrders = allOrders.map(order => {
+                            const status = (order.status || 'Pending').toLowerCase();
+                            const isCancelled = status.includes('cancel') || status.includes('return') || status === 'cancelled';
+                            const orderTotal = parseFloat(String(order.total || 0).replace(/[^0-9.]/g, '')) || 0;
+
+                            let orderWholesaleCost = 0;
+                            const pIds = order.productIds || [];
+                            const pStr = order.products || '';
+                            const rawItems = pStr.split(',').map(s => s.trim()).filter(Boolean);
+
+                            rawItems.forEach((itemStr, idx) => {
+                                const qtyMatch = itemStr.match(/\(x(\d+)\)$/);
+                                const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+                                const title = itemStr.replace(/\s*\(x\d+\)$/, '').trim().toLowerCase();
+                                const pId = pIds[idx] ? String(pIds[idx]) : null;
+
+                                let matched = null;
+                                if (pId && products) {
+                                    matched = products.find(p => String(p.id) === String(pId));
+                                }
+                                if (!matched && title && products) {
+                                    matched = products.find(p => (p.title || p.name || '').toLowerCase().includes(title) || title.includes((p.title || p.name || '').toLowerCase()));
+                                }
+
+                                if (matched && matched.wholesalePrice) {
+                                    const unitCost = parseFloat(String(matched.wholesalePrice).replace(/[^0-9.]/g, '')) || 0;
+                                    orderWholesaleCost += unitCost * qty;
+                                }
+                            });
+
+                            const orderMargin = orderTotal - orderWholesaleCost;
+
+                            if (!isCancelled) {
+                                totalGrossSales += orderTotal;
+                                totalWholesaleCost += orderWholesaleCost;
+                                totalEstimatedMargin += orderMargin;
+                                validOrdersCount += 1;
+
+                                if (status === 'delivered') {
+                                    deliveredProfit += orderMargin;
+                                    deliveredSales += orderTotal;
+                                }
+                            }
+
+                            return {
+                                ...order,
+                                isCancelled,
+                                orderTotal,
+                                orderWholesaleCost,
+                                orderMargin
+                            };
+                        });
+
+                        const marginPercentage = totalGrossSales > 0 ? ((totalEstimatedMargin / totalGrossSales) * 100).toFixed(1) : 0;
+
+                        return (
+                            <div>
+                                {/* Metric Cards */}
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                                    gap: '1rem',
+                                    marginBottom: '2rem'
+                                }}>
+                                    {/* Card 1: Total Gross Income */}
+                                    <div style={{
+                                        background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                                        border: '1px solid #bfdbfe',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: '1.25rem'
+                                    }}>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
+                                            <span style={{fontSize: '0.85rem', fontWeight: '600', color: '#1e40af'}}>Total Sales (Gross Income)</span>
+                                            <Icon name="dollar-sign" size={18} stroke="#1e40af" />
+                                        </div>
+                                        <div style={{fontSize: '1.75rem', fontWeight: '800', color: '#1e3a8a', lineHeight: 1.2}}>
+                                            ₹{totalGrossSales.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2})}
+                                        </div>
+                                        <div style={{fontSize: '0.75rem', color: '#3b82f6', marginTop: '0.4rem'}}>
+                                            From {validOrdersCount} active customer orders
+                                        </div>
+                                    </div>
+
+                                    {/* Card 2: Total Margin (Net Profit) */}
+                                    <div style={{
+                                        background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                                        border: '1px solid #a7f3d0',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: '1.25rem'
+                                    }}>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
+                                            <span style={{fontSize: '0.85rem', fontWeight: '600', color: '#065f46'}}>Total Net Profit (Margin)</span>
+                                            <Icon name="trending-up" size={18} stroke="#065f46" />
+                                        </div>
+                                        <div style={{fontSize: '1.75rem', fontWeight: '800', color: '#047857', lineHeight: 1.2}}>
+                                            ₹{totalEstimatedMargin.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2})}
+                                        </div>
+                                        <div style={{fontSize: '0.75rem', color: '#059669', marginTop: '0.4rem', fontWeight: '600'}}>
+                                            Overall Margin: {marginPercentage}%
+                                        </div>
+                                    </div>
+
+                                    {/* Card 3: Total Wholesale Purchase Cost */}
+                                    <div style={{
+                                        background: 'linear-gradient(135deg, #fefce8 0%, #fef08a 100%)',
+                                        border: '1px solid #fde047',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: '1.25rem'
+                                    }}>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
+                                            <span style={{fontSize: '0.85rem', fontWeight: '600', color: '#854d0e'}}>Total Wholesale Cost</span>
+                                            <Icon name="shopping-bag" size={18} stroke="#854d0e" />
+                                        </div>
+                                        <div style={{fontSize: '1.75rem', fontWeight: '800', color: '#713f12', lineHeight: 1.2}}>
+                                            ₹{totalWholesaleCost.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2})}
+                                        </div>
+                                        <div style={{fontSize: '0.75rem', color: '#a16207', marginTop: '0.4rem'}}>
+                                            Base cost paid to supplier/vendor
+                                        </div>
+                                    </div>
+
+                                    {/* Card 4: Delivered Realized Profit */}
+                                    <div style={{
+                                        background: 'linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%)',
+                                        border: '1px solid #d8b4fe',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: '1.25rem'
+                                    }}>
+                                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
+                                            <span style={{fontSize: '0.85rem', fontWeight: '600', color: '#6b21a8'}}>Delivered & Realized Profit</span>
+                                            <Icon name="check-circle" size={18} stroke="#6b21a8" />
+                                        </div>
+                                        <div style={{fontSize: '1.75rem', fontWeight: '800', color: '#581c87', lineHeight: 1.2}}>
+                                            ₹{deliveredProfit.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2})}
+                                        </div>
+                                        <div style={{fontSize: '0.75rem', color: '#7e22ce', marginTop: '0.4rem'}}>
+                                            Sales: ₹{deliveredSales.toFixed(0)}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Product Profit Margins Quick Breakdown */}
+                                <div style={{marginBottom: '2rem'}}>
+                                    <h3 style={{fontSize: '1.05rem', fontWeight: '700', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                        <Icon name="tag" size={18} style={{color: 'var(--accent-color)'}} /> Product Profit Breakdown (Per Unit)
+                                    </h3>
+                                    <div style={{overflowX: 'auto'}}>
+                                        <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left'}}>
+                                            <thead>
+                                                <tr style={{background: 'rgba(0,0,0,0.03)', borderBottom: '2px solid var(--border-color)'}}>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Product</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Selling Price</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Wholesale Cost</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Your Margin</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Margin %</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {products && products.length > 0 ? (
+                                                    products.map(p => {
+                                                        const sp = parseFloat(String(p.price || 0).replace(/[^0-9.]/g, '')) || 0;
+                                                        const wp = parseFloat(String(p.wholesalePrice || 0).replace(/[^0-9.]/g, '')) || 0;
+                                                        const m = sp - wp;
+                                                        const mp = sp > 0 ? ((m / sp) * 100).toFixed(1) : 0;
+                                                        return (
+                                                            <tr key={p.id} style={{borderBottom: '1px solid var(--border-color)'}}>
+                                                                <td style={{padding: '0.65rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                                                    <img src={p.image || 'logo.jpg'} style={{width: '32px', height: '32px', objectFit: 'cover', borderRadius: '4px'}} onError={e => { e.target.src = 'logo.jpg'; }} />
+                                                                    <span style={{fontWeight: '600'}}>{p.title}</span>
+                                                                </td>
+                                                                <td style={{padding: '0.65rem 0.75rem', fontWeight: '600'}}>₹{sp}</td>
+                                                                <td style={{padding: '0.65rem 0.75rem', color: wp > 0 ? 'var(--text-primary)' : '#9ca3af'}}>
+                                                                    {wp > 0 ? '₹' + wp : 'Not set'}
+                                                                </td>
+                                                                <td style={{padding: '0.65rem 0.75rem', fontWeight: '700', color: m >= 0 ? '#059669' : '#dc2626'}}>
+                                                                    ₹{m.toFixed(0)}
+                                                                </td>
+                                                                <td style={{padding: '0.65rem 0.75rem'}}>
+                                                                    <span style={{
+                                                                        padding: '2px 8px',
+                                                                        borderRadius: '4px',
+                                                                        background: m >= 0 ? '#ecfdf5' : '#fef2f2',
+                                                                        color: m >= 0 ? '#065f46' : '#991b1b',
+                                                                        fontWeight: '700',
+                                                                        fontSize: '0.8rem'
+                                                                    }}>
+                                                                        {mp}%
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                ) : (
+                                                    <tr><td colSpan="5" style={{padding: '1rem', textAlign: 'center', color: '#9ca3af'}}>No products found.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* Order by Order Financial Breakdown */}
+                                <div>
+                                    <h3 style={{fontSize: '1.05rem', fontWeight: '700', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                        <Icon name="list" size={18} style={{color: '#059669'}} /> Order Margin History
+                                    </h3>
+                                    <div style={{overflowX: 'auto'}}>
+                                        <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', textAlign: 'left'}}>
+                                            <thead>
+                                                <tr style={{background: 'rgba(0,0,0,0.03)', borderBottom: '2px solid var(--border-color)'}}>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Order ID</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Status</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Customer</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Order Total</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Est. Wholesale</th>
+                                                    <th style={{padding: '0.65rem 0.75rem'}}>Net Profit</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {enrichedOrders.length === 0 ? (
+                                                    <tr><td colSpan="6" style={{padding: '1.5rem', textAlign: 'center', color: '#9ca3af'}}>No orders recorded yet.</td></tr>
+                                                ) : (
+                                                    enrichedOrders.map(ord => (
+                                                        <tr key={ord.id} style={{
+                                                            borderBottom: '1px solid var(--border-color)',
+                                                            opacity: ord.isCancelled ? 0.6 : 1,
+                                                            background: ord.isCancelled ? '#fafafa' : 'transparent'
+                                                        }}>
+                                                            <td style={{padding: '0.65rem 0.75rem', fontWeight: '600'}}>
+                                                                {ord.orderId}
+                                                            </td>
+                                                            <td style={{padding: '0.65rem 0.75rem'}}>
+                                                                <span style={{
+                                                                    fontSize: '0.75rem',
+                                                                    padding: '2px 6px',
+                                                                    borderRadius: '4px',
+                                                                    fontWeight: '600',
+                                                                    background: ord.isCancelled ? '#fee2e2' : (ord.status === 'Delivered' ? '#dcfce7' : '#fef9c3'),
+                                                                    color: ord.isCancelled ? '#991b1b' : (ord.status === 'Delivered' ? '#166534' : '#854d0e')
+                                                                }}>
+                                                                    {ord.status || 'Pending'}
+                                                                </span>
+                                                            </td>
+                                                            <td style={{padding: '0.65rem 0.75rem'}}>{ord.name || 'Customer'}</td>
+                                                            <td style={{padding: '0.65rem 0.75rem', fontWeight: '700'}}>₹{ord.orderTotal}</td>
+                                                            <td style={{padding: '0.65rem 0.75rem', color: 'var(--text-secondary)'}}>₹{ord.orderWholesaleCost.toFixed(0)}</td>
+                                                            <td style={{padding: '0.65rem 0.75rem', fontWeight: '800', color: ord.isCancelled ? '#9ca3af' : (ord.orderMargin >= 0 ? '#059669' : '#dc2626')}}>
+                                                                {ord.isCancelled ? '₹0 (Cancelled)' : '₹' + ord.orderMargin.toFixed(0)}
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
         </div>
