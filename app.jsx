@@ -1698,22 +1698,37 @@ const App = () => {
                             const orderTotal = parseFloat(String(order.total || 0).replace(/[^0-9.]/g, '')) || 0;
 
                             let orderWholesaleCost = 0;
-                            const pIds = order.productIds || [];
+                            const pIds = (order.productIds || []).map(String);
                             const pStr = order.products || '';
-                            const rawItems = pStr.split(',').map(s => s.trim()).filter(Boolean);
 
-                            rawItems.forEach((itemStr, idx) => {
-                                const qtyMatch = itemStr.match(/\(x(\d+)\)$/);
-                                const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
-                                const title = itemStr.replace(/\s*\(x\d+\)$/, '').trim().toLowerCase();
-                                const pId = pIds[idx] ? String(pIds[idx]) : null;
+                            // Robust regex parsing: items formatted as "Title (xQuantity)"
+                            const parsedItems = [];
+                            const re = /(.+?)\s*\(x(\d+)\)(?:,\s*|$)/g;
+                            let match;
+                            while ((match = re.exec(pStr)) !== null) {
+                                parsedItems.push({ title: match[1].trim(), qty: parseInt(match[2], 10) || 1 });
+                            }
+                            if (parsedItems.length === 0 && pStr) {
+                                parsedItems.push({ title: pStr.trim(), qty: 1 });
+                            }
+
+                            parsedItems.forEach((item, idx) => {
+                                const qty = item.qty || 1;
+                                const pId = pIds[idx] || null;
 
                                 let matched = null;
                                 if (pId && products) {
-                                    matched = products.find(p => String(p.id) === String(pId));
+                                    matched = products.find(p => String(p.id) === pId);
                                 }
-                                if (!matched && title && products) {
-                                    matched = products.find(p => (p.title || p.name || '').toLowerCase().includes(title) || title.includes((p.title || p.name || '').toLowerCase()));
+                                if (!matched && item.title && products) {
+                                    const cleanTitle = item.title.toLowerCase().trim();
+                                    matched = products.find(p => (p.title || p.name || '').toLowerCase().trim() === cleanTitle);
+                                    if (!matched) {
+                                        matched = products.find(p => {
+                                            const t = (p.title || p.name || '').toLowerCase().trim();
+                                            return t && (t === cleanTitle || t.startsWith(cleanTitle) || cleanTitle.startsWith(t));
+                                        });
+                                    }
                                 }
 
                                 if (matched && matched.wholesalePrice) {
@@ -2982,25 +2997,37 @@ const MyOrdersView = ({
     const parsedOrderItems = React.useMemo(() => {
         if (!selectedOrderDetails) return [];
         const productsStr = selectedOrderDetails.products || '';
-        const rawItems = productsStr.split(',').map(s => s.trim()).filter(Boolean);
-        const pIds = selectedOrderDetails.productIds || [];
+        const pIds = (selectedOrderDetails.productIds || []).map(String);
 
-        return rawItems.map((itemStr, idx) => {
-            const qtyMatch = itemStr.match(/\(x(\d+)\)$/);
-            const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
-            const title = itemStr.replace(/\s*\(x\d+\)$/, '').trim();
-            const pId = pIds[idx] ? String(pIds[idx]) : null;
+        // Robust regex parsing for items like "Title (xQuantity)"
+        const rawItems = [];
+        const re = /(.+?)\s*\(x(\d+)\)(?:,\s*|$)/g;
+        let match;
+        while ((match = re.exec(productsStr)) !== null) {
+            rawItems.push({ title: match[1].trim(), qty: parseInt(match[2], 10) || 1 });
+        }
+        if (rawItems.length === 0 && productsStr) {
+            rawItems.push({ title: productsStr.trim(), qty: 1 });
+        }
+
+        return rawItems.map((item, idx) => {
+            const title = item.title;
+            const qty = item.qty;
+            const pId = pIds[idx] || null;
 
             let matchedProduct = null;
             if (pId && products) {
-                matchedProduct = products.find(p => String(p.id) === String(pId));
+                matchedProduct = products.find(p => String(p.id) === pId);
             }
             if (!matchedProduct && title && products) {
-                const cleanTitle = title.toLowerCase();
-                matchedProduct = products.find(p => {
-                    const t = (p.title || p.name || '').toLowerCase();
-                    return t.includes(cleanTitle) || cleanTitle.includes(t);
-                });
+                const cleanTitle = title.toLowerCase().trim();
+                matchedProduct = products.find(p => (p.title || p.name || '').toLowerCase().trim() === cleanTitle);
+                if (!matchedProduct) {
+                    matchedProduct = products.find(p => {
+                        const t = (p.title || p.name || '').toLowerCase().trim();
+                        return t && (t === cleanTitle || t.startsWith(cleanTitle) || cleanTitle.startsWith(t));
+                    });
+                }
             }
 
             const finalProd = matchedProduct || {
