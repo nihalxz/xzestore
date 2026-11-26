@@ -19,23 +19,23 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
     <!-- App Styles -->
-    <link rel="stylesheet" href="styles.css?v=2.29">
+    <link rel="stylesheet" href="styles.css?v=2.30">
 
     <!-- React and ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- html2canvas for Receipt Download -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- html2canvas for Receipt Download (deferred for fast loading) -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
     <div id="root">
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: 'Outfit', sans-serif; background: #faf5ff;">
-            <div style="width: 40px; height: 40px; border: 3px solid #e2e8f0; border-top: 3px solid #9333ea; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <h2 style="margin-top: 20px; color: #9333ea; font-weight: 700; margin-bottom: 5px;">xzestore</h2>
-            <p style="color: #6b7280; font-size: 0.9rem; margin: 0;">Loading amazing products...</p>
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: 'Outfit', sans-serif; background: #f8fafc;">
+            <div style="width: 42px; height: 42px; border: 3px solid #e2e8f0; border-top: 3px solid #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <h2 style="margin-top: 18px; color: #2563eb; font-weight: 700; margin-bottom: 5px; letter-spacing: -0.5px;">xzestore</h2>
+            <p style="color: #64748b; font-size: 0.9rem; margin: 0;">Loading store...</p>
             <style>
                 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
                 body { margin: 0; }
@@ -53,6 +53,6 @@
     </script>
 
     <!-- Main React App -->
-    <script type="text/babel" src="app.jsx?v=2.29"></script>
+    <script type="text/babel" src="app.jsx?v=2.30"></script>
 </body>
 </html>

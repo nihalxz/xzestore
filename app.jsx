@@ -17,14 +17,20 @@ if (!firebase.apps.length) {
 }
 const db = firebase.firestore();
 
-// Safe Icon Component to prevent React DOM conflicts with Lucide
-const Icon = ({ name, size, className, style, fill, stroke, onClick }) => {
-    let attrs = `data-lucide="${name}"`;
-    if (size) attrs += ` width="${size}" height="${size}"`;
-    if (fill) attrs += ` fill="${fill}"`;
-    if (stroke) attrs += ` stroke="${stroke}"`;
-    
-    const iconHtml = `<i ${attrs}></i>`;
+// Safe Fast Icon Component (direct SVG rendering for zero UI lag)
+const Icon = ({ name, size = 18, className = "", style = {}, fill = "none", stroke = "currentColor", onClick }) => {
+    let iconHtml;
+    if (window.lucide && window.lucide.icons && window.lucide.icons[name]) {
+        iconHtml = window.lucide.icons[name].toSvg({
+            width: size,
+            height: size,
+            fill: fill,
+            stroke: stroke,
+            class: className
+        });
+    } else {
+        iconHtml = `<i data-lucide="${name}" width="${size}" height="${size}" fill="${fill}" stroke="${stroke}"></i>`;
+    }
     return (
         <span 
             className={className} 
@@ -36,19 +42,61 @@ const Icon = ({ name, size, className, style, fill, stroke, onClick }) => {
 };
 
 const App = () => {
+    // Read URL search params synchronously on startup
+    const initialUrlParam = (() => {
+        try {
+            return new URLSearchParams(window.location.search).get('product');
+        } catch(e) {
+            return null;
+        }
+    })();
+
+    // Read cached products synchronously for zero-lag instant render
+    const cachedProductsInitial = (() => {
+        try {
+            const cached = localStorage.getItem("expoz_products_cache");
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            }
+        } catch(e) {}
+        return null;
+    })();
+
+    const initialMatchedProduct = (() => {
+        if (initialUrlParam && cachedProductsInitial) {
+            return cachedProductsInitial.find(p => String(p.id) === String(initialUrlParam)) || null;
+        }
+        return null;
+    })();
+
     // ---- State Management ----
-    const [cart, setCart] = useState([]);
+    const [cart, setCart] = useState(() => {
+        try {
+            const savedCart = localStorage.getItem("expoz_cart");
+            return savedCart ? JSON.parse(savedCart) : [];
+        } catch(e) {
+            return [];
+        }
+    });
     const [toastMsg, setToastMsg] = useState("");
-    const [currentView, setCurrentView] = useState("store"); 
+    const [currentView, setCurrentView] = useState(() => initialUrlParam ? "product" : "store"); 
     const [checkoutMode, setCheckoutMode] = useState("single");
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     
     // Auth State
-    const [currentUser, setCurrentUser] = useState(null); 
+    const [currentUser, setCurrentUser] = useState(() => {
+        try {
+            const savedUser = localStorage.getItem("expoz_user");
+            return savedUser ? JSON.parse(savedUser) : null;
+        } catch(e) {
+            return null;
+        }
+    }); 
     
     // Database State (Products)
-    const [products, setProducts] = useState(null); // null means loading
-    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [products, setProducts] = useState(cachedProductsInitial);
+    const [selectedProduct, setSelectedProduct] = useState(initialMatchedProduct);
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
     // Form states
@@ -197,26 +245,42 @@ const App = () => {
         localStorage.setItem("expoz_cart", JSON.stringify(cart));
     }, [cart]);
 
-    // Re-run icons script when the view changes
+    // Re-run icons script only on view change without blocking UI
     useEffect(() => {
-        if (window.lucide) {
-            window.lucide.createIcons();
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            requestAnimationFrame(() => {
+                window.lucide.createIcons();
+            });
         }
-    }, [currentView, cart.length, toastMsg, products, currentUser, isMenuOpen]);
+    }, [currentView, isMenuOpen]);
 
-    // Deep-link: Automatically open product if ?product=ID is present in URL
+    // Deep-link: If ?product=ID is present in URL, ensure product is loaded and shown
     useEffect(() => {
-        if (!products || products.length === 0) return;
         try {
             const params = new URLSearchParams(window.location.search);
             const prodId = params.get('product');
             if (prodId) {
-                const found = products.find(p => String(p.id) === String(prodId));
-                if (found) {
-                    setSelectedProduct(found);
-                    setCurrentView('product');
-                    window.scrollTo(0, 0);
+                // If already selected, do nothing
+                if (selectedProduct && String(selectedProduct.id) === String(prodId)) return;
+
+                // 1. Try finding in loaded products array
+                if (products && products.length > 0) {
+                    const found = products.find(p => String(p.id) === String(prodId));
+                    if (found) {
+                        setSelectedProduct(found);
+                        setCurrentView('product');
+                        return;
+                    }
                 }
+
+                // 2. Direct single-doc fetch from Firestore for ultra-fast response
+                db.collection('products').doc(prodId).get().then(doc => {
+                    if (doc.exists) {
+                        const prodData = { id: doc.id, ...doc.data() };
+                        setSelectedProduct(prodData);
+                        setCurrentView('product');
+                    }
+                }).catch(e => console.error("Direct fetch error:", e));
             }
         } catch(e) {
             console.error("Deep link error:", e);
@@ -233,6 +297,7 @@ const App = () => {
                     window.history.pushState({ productId: selectedProduct.id }, '', url.toString());
                 }
             } else if (currentView !== 'product' && url.searchParams.has('product')) {
+                // User navigated away from product page
                 url.searchParams.delete('product');
                 window.history.pushState({}, '', url.toString());
             }
@@ -253,7 +318,7 @@ const App = () => {
                         return;
                     }
                 }
-                if (!prodId && currentView === 'product') {
+                if (!prodId) {
                     setSelectedProduct(null);
                     setCurrentView('store');
                 }
@@ -261,7 +326,7 @@ const App = () => {
         };
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [products, currentView]);
+    }, [products]);
 
     // Load Admin Orders when tab changes
     useEffect(() => {
@@ -1493,7 +1558,23 @@ const App = () => {
     };
 
     const renderProductDetail = () => {
-        if (!selectedProduct) return null;
+        if (!selectedProduct) {
+            return (
+                <div className="animate-fade-in" style={{ textAlign: 'center', padding: '6rem 1rem' }}>
+                    <div style={{ width: '42px', height: '42px', border: '3px solid #e2e8f0', borderTop: '3px solid var(--accent-color)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 1.5rem auto' }}></div>
+                    <h3 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem', fontSize: '1.2rem', fontWeight: '600' }}>Loading Product Details...</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '320px', margin: '0 auto' }}>Fetching the latest price, photos and reviews.</p>
+                    <button 
+                        className="btn btn-continue" 
+                        style={{ marginTop: '1.5rem', width: 'auto', display: 'inline-block', padding: '0.6rem 1.5rem', fontSize: '0.9rem' }} 
+                        onClick={() => { setSelectedProduct(null); setCurrentView('store'); }}
+                    >
+                        Browse All Products
+                    </button>
+                    <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                </div>
+            );
+        }
         
         const ratingData = getProductRatingData(selectedProduct);
         const baseCount = Number(ratingData.reviews) || 128;
