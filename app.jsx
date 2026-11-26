@@ -32,10 +32,10 @@ const Icon = ({ name, size = 18, className = "", style = {}, fill = "none", stro
         iconHtml = `<i data-lucide="${name}" width="${size}" height="${size}" fill="${fill}" stroke="${stroke}"></i>`;
     }
     return (
-        <span 
-            className={className} 
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: onClick ? 'pointer' : 'inherit', ...style }} 
-            dangerouslySetInnerHTML={{ __html: iconHtml }} 
+        <span
+            className={className}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: onClick ? 'pointer' : 'inherit', ...style }}
+            dangerouslySetInnerHTML={{ __html: iconHtml }}
             onClick={onClick}
         />
     );
@@ -80,10 +80,10 @@ const App = () => {
         }
     });
     const [toastMsg, setToastMsg] = useState("");
-    const [currentView, setCurrentView] = useState(() => initialUrlParam ? "product" : "store"); 
+    const [currentView, setCurrentView] = useState(() => initialUrlParam ? "product" : "store");
     const [checkoutMode, setCheckoutMode] = useState("single");
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    
+
     // Auth State
     const [currentUser, setCurrentUser] = useState(() => {
         try {
@@ -92,8 +92,8 @@ const App = () => {
         } catch(e) {
             return null;
         }
-    }); 
-    
+    });
+
     // Database State (Products)
     const [products, setProducts] = useState(cachedProductsInitial);
     const [selectedProduct, setSelectedProduct] = useState(initialMatchedProduct);
@@ -102,7 +102,7 @@ const App = () => {
     // Form states
     const [authEmail, setAuthEmail] = useState("");
     const [authPassword, setAuthPassword] = useState("");
-    
+
     const [newProduct, setNewProduct] = useState({
         title: "", price: "", mrp: "", image: "", images: [], description: "", category: "Fashion"
     });
@@ -113,12 +113,13 @@ const App = () => {
     const [orderFormData, setOrderFormData] = useState({
         name: '', phone: '', email: '', address1: '', address2: '', landmark: '', pincode: '', city: '', state: ''
     });
-    
+
     const [productReviews, setProductReviews] = useState(null);
     const [newReview, setNewReview] = useState({ rating: 0, comment: "", photos: [], userName: "" });
     const [hoverRating, setHoverRating] = useState(0);
     const [isSubmittingReview, setIsSubmittingReview] = useState(false);
     const [canUserReview, setCanUserReview] = useState(false);
+    const [reviewReturnView, setReviewReturnView] = useState('product');
     const [orderId, setOrderId] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -397,6 +398,81 @@ const App = () => {
         });
     };
 
+    // Helper function to check if a product is purchased in any order on this device or by current user
+    const checkIsProductPurchased = (pId, pTitle) => {
+        if (currentUser && currentUser.role === 'admin') return true;
+
+        const prodId = String(pId || '');
+        const targetTitle = (pTitle || '').toLowerCase().trim();
+
+        // 1. Device-wide purchased list (fastest & most reliable on device)
+        try {
+            const devicePurchased = JSON.parse(localStorage.getItem('expoz_device_purchased') || '[]');
+            if (Array.isArray(devicePurchased) && devicePurchased.map(String).includes(prodId)) return true;
+        } catch(e) {}
+
+        // 2. Check all expoz_purchased_* keys in localStorage
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('expoz_purchased_')) {
+                    const list = JSON.parse(localStorage.getItem(key) || '[]');
+                    if (Array.isArray(list) && list.map(String).includes(prodId)) return true;
+                }
+            }
+        } catch(e) {}
+
+        // 3. Helper to match an order against product
+        const orderMatchesProduct = (ord) => {
+            if (!ord) return false;
+            const status = (ord.status || '').toLowerCase();
+            if (status.includes('cancel') || status.includes('return')) return false;
+
+            // Check productIds array
+            if (ord.productIds && Array.isArray(ord.productIds)) {
+                if (ord.productIds.map(String).includes(prodId)) return true;
+            }
+
+            // Check products text string
+            if (ord.products && typeof ord.products === 'string') {
+                const orderProductsStr = ord.products.toLowerCase();
+                if (!targetTitle) return false;
+
+                const cleanOrderStr = orderProductsStr.replace(/\s*\(x\d+\)/gi, '').trim();
+                if (orderProductsStr.includes(targetTitle) || targetTitle.includes(cleanOrderStr)) return true;
+
+                // Split into individual items if multiple products in order
+                const items = orderProductsStr.split(',').map(s => s.replace(/\s*\(x\d+\)/gi, '').trim());
+                for (const item of items) {
+                    if (!item) continue;
+                    if (targetTitle.includes(item) || item.includes(targetTitle)) return true;
+
+                    // Word overlap matching
+                    const itemWords = item.split(/\s+/).filter(w => w.length > 2);
+                    const titleWords = targetTitle.split(/\s+/).filter(w => w.length > 2);
+                    if (itemWords.length > 0 && titleWords.length > 0) {
+                        const matches = itemWords.filter(w => titleWords.includes(w));
+                        if (matches.length >= Math.min(2, itemWords.length)) return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        // 4. Check all expoz_orders_* keys in localStorage
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('expoz_orders_')) {
+                    const orders = JSON.parse(localStorage.getItem(key) || '[]');
+                    if (Array.isArray(orders) && orders.some(orderMatchesProduct)) return true;
+                }
+            }
+        } catch(e) {}
+
+        return false;
+    };
+
     // Check if the current user has purchased the selected product (Verified Buyer for reviews)
     useEffect(() => {
         let isMounted = true;
@@ -409,6 +485,15 @@ const App = () => {
 
             // Admin can always review for testing
             if (currentUser && currentUser.role === 'admin') {
+                if (isMounted) setCanUserReview(true);
+                return;
+            }
+
+            const prodId = String(selectedProduct.id || '');
+            const prodTitle = selectedProduct.title || selectedProduct.name || '';
+
+            // Check local device & cached orders first (instant)
+            if (checkIsProductPurchased(prodId, prodTitle)) {
                 if (isMounted) setCanUserReview(true);
                 return;
             }
@@ -431,43 +516,8 @@ const App = () => {
             }
 
             userEmail = userEmail.toLowerCase().trim();
-            const prodId = String(selectedProduct.id);
-            const prodTitle = selectedProduct.title ? selectedProduct.title.toLowerCase().trim() : '';
 
-            // Check 1: LocalStorage purchased list (instant)
-            try {
-                const purchasedList = JSON.parse(localStorage.getItem(`expoz_purchased_${userEmail}`) || '[]');
-                if (purchasedList.includes(prodId)) {
-                    if (isMounted) setCanUserReview(true);
-                    return;
-                }
-            } catch(e) {}
-
-            // Check 2: LocalStorage cached orders (instant)
-            try {
-                const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
-                const found = localOrders.find(ord => {
-                    const status = (ord.status || '').toLowerCase();
-                    if (status.includes('cancel') || status.includes('return')) return false;
-                    if (ord.productIds && ord.productIds.includes(prodId)) return true;
-                    if (ord.products && ord.products.toLowerCase().includes(prodTitle)) return true;
-                    return false;
-                });
-                if (found) {
-                    if (isMounted) setCanUserReview(true);
-                    try {
-                        const purchasedKey = `expoz_purchased_${userEmail}`;
-                        const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
-                        if (!existing.includes(prodId)) {
-                            existing.push(prodId);
-                            localStorage.setItem(purchasedKey, JSON.stringify(existing));
-                        }
-                    } catch(e) {}
-                    return;
-                }
-            } catch(e) {}
-
-            // Check 3: Check Firestore orders in background
+            // Check Firestore orders in background
             try {
                 const snap = await db.collection('orders')
                     .where('email', '==', userEmail)
@@ -478,19 +528,22 @@ const App = () => {
                     const ord = doc.data();
                     const status = (ord.status || '').toLowerCase();
                     if (!status.includes('cancel') && !status.includes('return')) {
-                        if (ord.productIds && ord.productIds.includes(prodId)) hasBought = true;
-                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) hasBought = true;
+                        if (ord.productIds && ord.productIds.map(String).includes(prodId)) hasBought = true;
+                        if (ord.products && typeof ord.products === 'string') {
+                            const pLower = ord.products.toLowerCase();
+                            const tLower = prodTitle.toLowerCase().trim();
+                            if (pLower.includes(tLower) || tLower.includes(pLower.replace(/\s*\(x\d+\)/gi, '').trim())) hasBought = true;
+                        }
                     }
                 });
 
                 if (hasBought) {
                     if (isMounted) setCanUserReview(true);
                     try {
-                        const purchasedKey = `expoz_purchased_${userEmail}`;
-                        const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
-                        if (!existing.includes(prodId)) {
-                            existing.push(prodId);
-                            localStorage.setItem(purchasedKey, JSON.stringify(existing));
+                        const devicePurchased = JSON.parse(localStorage.getItem('expoz_device_purchased') || '[]');
+                        if (!devicePurchased.map(String).includes(prodId)) {
+                            devicePurchased.push(prodId);
+                            localStorage.setItem('expoz_device_purchased', JSON.stringify(devicePurchased));
                         }
                     } catch(e) {}
                 } else {
@@ -509,7 +562,7 @@ const App = () => {
 
     const handleSubmitReview = async (e) => {
         e.preventDefault();
-        
+
         let finalUserName = "Customer";
         if (newReview.userName.trim()) {
             finalUserName = newReview.userName.trim();
@@ -532,35 +585,16 @@ const App = () => {
 
         // Enforce verified buyer check on submit
         if (currentUser && currentUser.role !== 'admin') {
-            const userEmail = currentUser.email.toLowerCase().trim();
-            const prodId = String(selectedProduct.id);
-            const purchasedKey = `expoz_purchased_${userEmail}`;
-            let verified = false;
-            try {
-                const list = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
-                if (list.includes(prodId)) verified = true;
-            } catch(e) {}
-
-            if (!verified) {
-                try {
-                    const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
-                    const found = localOrders.find(ord => {
-                        const status = (ord.status || '').toLowerCase();
-                        if (status.includes('cancel') || status.includes('return')) return false;
-                        if (ord.productIds && ord.productIds.includes(prodId)) return true;
-                        if (ord.products && ord.products.toLowerCase().includes(selectedProduct.title.toLowerCase().trim())) return true;
-                        return false;
-                    });
-                    if (found) verified = true;
-                } catch(e) {}
-            }
+            const prodId = String(selectedProduct.id || '');
+            const prodTitle = selectedProduct.title || selectedProduct.name || '';
+            const verified = checkIsProductPurchased(prodId, prodTitle);
 
             if (!verified) {
                 showToast("Only verified buyers can submit reviews.");
                 return;
             }
         }
-        
+
         setIsSubmittingReview(true);
         try {
             const reviewData = {
@@ -573,9 +607,9 @@ const App = () => {
                 verifiedPurchase: true,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             };
-            
+
             const docRef = await db.collection('product_reviews').add(reviewData);
-            
+
             setProductReviews([{
                 id: docRef.id,
                 ...reviewData,
@@ -592,11 +626,11 @@ const App = () => {
             // Update in local products state
             setProducts(prev => prev ? prev.map(p => p.id === selectedProduct.id ? { ...p, reviews: String(newReviewsCount) } : p) : prev);
             setSelectedProduct(prev => prev ? { ...prev, reviews: String(newReviewsCount) } : prev);
-            
+
             showToast("Review submitted successfully!");
             setNewReview({ rating: 0, comment: "", photos: [], userName: "" });
             setCurrentView('product');
-            
+
         } catch (error) {
             console.error("Error submitting review:", error);
             showToast("Failed to submit review");
@@ -636,7 +670,7 @@ const App = () => {
         setCurrentUser(userObj);
         localStorage.setItem("expoz_user", JSON.stringify(userObj));
         showToast("Logged in successfully!");
-        
+
         if (userObj.role === 'admin') setCurrentView('admin');
         else setCurrentView('store');
     };
@@ -743,7 +777,7 @@ const App = () => {
 
             setNewProduct({ title: "", price: "", mrp: "", image: "", images: [], description: "", category: "Fashion" });
             setEditingProductId(null);
-            
+
             const fileInput = document.getElementById('image-upload-input');
             if (fileInput) fileInput.value = '';
         } catch (error) {
@@ -811,7 +845,7 @@ const App = () => {
         if (reason === null) return false; // User clicked cancel on the prompt
 
         try {
-            await db.collection('orders').doc(order.id).update({ 
+            await db.collection('orders').doc(order.id).update({
                 status: 'Cancellation Requested',
                 cancellationReason: reason || "No reason provided"
             });
@@ -820,7 +854,7 @@ const App = () => {
             // Open WhatsApp Message for cancellation
             const cancelMessage = `*Cancellation Requested!*\n\n*Order ID:* ${order.orderId}\n*Customer:* ${order.name}\n*Reason:* ${reason || "No reason provided"}\n\n_The customer has requested to cancel their order._`;
             const encodedMessage = encodeURIComponent(cancelMessage);
-            
+
             // Send Push Notification to Mobile via ntfy
             const ntfyMessage = `Cancellation Requested!\nOrder: ${order.orderId}\nFrom: ${order.name}\nReason: ${reason || "None"}`;
             fetch("https://ntfy.sh/xzestore_orders_live", {
@@ -842,7 +876,7 @@ const App = () => {
         if (reason === null) return false; // User clicked cancel on the prompt
 
         try {
-            await db.collection('orders').doc(order.id).update({ 
+            await db.collection('orders').doc(order.id).update({
                 status: 'Return Requested',
                 returnReason: reason || "No reason provided"
             });
@@ -851,7 +885,7 @@ const App = () => {
             // Open WhatsApp Message for return
             const returnMessage = `*Return Requested!*\n\n*Order ID:* ${order.orderId}\n*Customer:* ${order.name}\n*Reason:* ${reason || "No reason provided"}\n\n_The customer has requested to return their order._`;
             const encodedMessage = encodeURIComponent(returnMessage);
-            
+
             // Send Push Notification to Mobile via ntfy
             const ntfyMessage = `Return Requested!\nOrder: ${order.orderId}\nFrom: ${order.name}\nReason: ${reason || "None"}`;
             fetch("https://ntfy.sh/xzestore_orders_live", {
@@ -898,7 +932,7 @@ const App = () => {
                         let width = img.width;
                         let height = img.height;
                         const MAX_SIZE = 800;
-                        
+
                         if (width > height) {
                             if (width > MAX_SIZE) {
                                 height *= MAX_SIZE / width;
@@ -910,15 +944,15 @@ const App = () => {
                                 height = MAX_SIZE;
                             }
                         }
-                        
+
                         canvas.width = width;
                         canvas.height = height;
                         const ctx = canvas.getContext('2d');
-                        
+
                         ctx.fillStyle = "#ffffff";
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.drawImage(img, 0, 0, width, height);
-                        
+
                         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
                         setNewProduct(prev => {
                             const newImages = [...(prev.images || []), compressedBase64];
@@ -956,7 +990,7 @@ const App = () => {
     const handleAddToCart = (e) => {
         if(e) e.stopPropagation();
         if (!selectedProduct) return;
-        
+
         setCart(prev => {
             const exists = prev.find(item => item.id === selectedProduct.id);
             if (exists) {
@@ -1060,7 +1094,7 @@ const App = () => {
             }
         }
     };
-    
+
     const handlePlaceOrder = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
@@ -1075,14 +1109,14 @@ const App = () => {
             return total + (priceVal * item.qty);
         }, 0);
 
-        const addressToUse = (!isAddingNewAddress && savedAddresses.length > 0 && selectedAddressIndex >= 0) 
-            ? savedAddresses[selectedAddressIndex] 
+        const addressToUse = (!isAddingNewAddress && savedAddresses.length > 0 && selectedAddressIndex >= 0)
+            ? savedAddresses[selectedAddressIndex]
             : orderFormData;
 
         const checkoutEmail = currentUser ? currentUser.email : addressToUse.email;
-        
+
         const fullAddress = `House: ${addressToUse.address1}, Road/Area: ${addressToUse.address2}, Landmark: ${addressToUse.landmark || 'N/A'}, City: ${addressToUse.city}, State: ${addressToUse.state}, PIN: ${addressToUse.pincode}`;
-        
+
         const textMessage = `*New Order Placed!*\n\n*Order ID:* ${generatedId}\n*Customer:* ${addressToUse.name}\n*Phone:* ${addressToUse.phone}\n*Email:* ${checkoutEmail}\n*Address:* ${fullAddress}\n\n*Products:*\n${itemsToCheckout.map(i => `- ${i.title} (x${i.qty})`).join('\n')}\n\n*Total Amount:* ₹${orderTotal}\n\n_Payment Method: Cash on Delivery_`;
 
         const orderData = {
@@ -1133,7 +1167,7 @@ const App = () => {
 
             // 1. Save order to Firestore (Fire and forget to avoid UI lag)
             firebase.firestore().collection('orders').doc(generatedId).set(orderData).catch(e => console.error(e));
-            
+
             // 1.5 Save order to local cache so My Orders always has it
             try {
                 let userOrders = JSON.parse(localStorage.getItem(`expoz_orders_${checkoutEmail}`) || "[]");
@@ -1144,13 +1178,22 @@ const App = () => {
                 localStorage.setItem(`expoz_orders_${checkoutEmail}`, JSON.stringify(userOrders));
 
                 // Save purchased products for verified reviews
-                const purchasedKey = `expoz_purchased_${checkoutEmail.toLowerCase().trim()}`;
-                const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
                 const newIds = itemsToCheckout.map(i => String(i.id));
-                const merged = Array.from(new Set([...existing, ...newIds]));
-                localStorage.setItem(purchasedKey, JSON.stringify(merged));
+
+                try {
+                    const devicePurchased = JSON.parse(localStorage.getItem('expoz_device_purchased') || '[]');
+                    const mergedDevice = Array.from(new Set([...devicePurchased, ...newIds]));
+                    localStorage.setItem('expoz_device_purchased', JSON.stringify(mergedDevice));
+                } catch(e) {}
+
+                if (checkoutEmail) {
+                    const purchasedKey = `expoz_purchased_${checkoutEmail.toLowerCase().trim()}`;
+                    const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                    const merged = Array.from(new Set([...existing, ...newIds]));
+                    localStorage.setItem(purchasedKey, JSON.stringify(merged));
+                }
             } catch(e) {}
-            
+
             // 2. Send data to Google Sheets via Apps Script Web App (Fire and forget)
             fetch("https://script.google.com/macros/s/AKfycbwpPGzU_hDD3vN_lkrbc8_m6SAJ5_HCxGowzHczg_ZDjIJWPMw8T7gKPr1VTOtGTxAU/exec", {
                 method: "POST",
@@ -1167,7 +1210,7 @@ const App = () => {
                 method: "POST",
                 body: ntfyMessage
             }).catch(e => console.error(e));
-            
+
             // 3. Artificial 1 second delay for better user experience
             setTimeout(() => {
                 // Show success view and play sound
@@ -1188,7 +1231,7 @@ const App = () => {
                 }, 2000);
 
             }, 1000);
-            
+
         } catch (error) {
             console.error("Error placing order:", error);
             showToast("Failed to place order. Please try again.");
@@ -1259,7 +1302,7 @@ const App = () => {
                         <input type="text" className="search-input" placeholder="Search for products..." />
                         <button className="search-btn">Search</button>
                     </div>
-                    
+
                     <div className="header-actions">
                         {currentUser ? (
                             <React.Fragment key="logged-in-nav">
@@ -1280,7 +1323,7 @@ const App = () => {
                                 <span>Sign In</span>
                             </button>
                         )}
-                        
+
                         <button className="cart-btn" aria-label="Cart" onClick={() => setCurrentView('cart')}>
                             <Icon name="shopping-cart" size="22" />
                             <span>Cart</span>
@@ -1289,7 +1332,7 @@ const App = () => {
                     </div>
                 </div>
             </div>
-            
+
             {(currentView === 'store' || currentView === 'product') && (
                 <div className="category-nav">
                     <ul className="cat-list">
@@ -1312,10 +1355,10 @@ const App = () => {
             <form onSubmit={handleLogin}>
                 <div className="form-group">
                     <label className="form-label">Email Address</label>
-                    <input 
-                        type="email" 
-                        className="form-input" 
-                        required 
+                    <input
+                        type="email"
+                        className="form-input"
+                        required
                         placeholder="name@gmail.com"
                         value={authEmail}
                         onChange={e => setAuthEmail(e.target.value)}
@@ -1324,10 +1367,10 @@ const App = () => {
                 {authEmail.toLowerCase() === ADMIN_EMAIL && (
                     <div className="form-group">
                         <label className="form-label">Admin Password</label>
-                        <input 
-                            type="password" 
-                            className="form-input" 
-                            required 
+                        <input
+                            type="password"
+                            className="form-input"
+                            required
                             placeholder="••••••••"
                             value={authPassword}
                             onChange={e => setAuthPassword(e.target.value)}
@@ -1346,13 +1389,13 @@ const App = () => {
                     <Icon name="arrow-left" size="18" /> Back to Store
                 </button>
                 <div style={{display: 'flex', gap: '0.5rem', background: 'var(--card-bg)', borderRadius: 'var(--radius-md)', padding: '0.25rem'}}>
-                    <button 
-                        style={{padding: '0.5rem 1rem', border: 'none', background: adminViewTab === 'products' ? 'var(--accent-color)' : 'transparent', color: adminViewTab === 'products' ? 'white' : 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer'}} 
+                    <button
+                        style={{padding: '0.5rem 1rem', border: 'none', background: adminViewTab === 'products' ? 'var(--accent-color)' : 'transparent', color: adminViewTab === 'products' ? 'white' : 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer'}}
                         onClick={() => setAdminViewTab('products')}>
                         Products
                     </button>
-                    <button 
-                        style={{padding: '0.5rem 1rem', border: 'none', background: adminViewTab === 'orders' ? 'var(--accent-color)' : 'transparent', color: adminViewTab === 'orders' ? 'white' : 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer'}} 
+                    <button
+                        style={{padding: '0.5rem 1rem', border: 'none', background: adminViewTab === 'orders' ? 'var(--accent-color)' : 'transparent', color: adminViewTab === 'orders' ? 'white' : 'var(--text-primary)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer'}}
                         onClick={() => setAdminViewTab('orders')}>
                         Orders
                     </button>
@@ -1370,7 +1413,7 @@ const App = () => {
                         <form onSubmit={handleSaveProduct}>
                             <div className="form-group">
                                 <label className="form-label">Product Title</label>
-                                <input type="text" className="form-input" required 
+                                <input type="text" className="form-input" required
                                     value={newProduct.title} onChange={e => setNewProduct({...newProduct, title: e.target.value})} />
                             </div>
                             <div className="form-group">
@@ -1447,7 +1490,7 @@ const App = () => {
                             </h2>
                             <span style={{color: 'var(--text-secondary)', fontSize: '0.9rem'}}>{products ? products.length : 0} Items</span>
                         </div>
-                        
+
                         <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
                             {products === null ? (
                                 <p style={{color: 'var(--accent-color)'}}>Loading from Firebase...</p>
@@ -1486,7 +1529,7 @@ const App = () => {
                             <input type="text" className="search-input" placeholder="Search by Order ID..." value={adminSearchTerm} onChange={e => setAdminSearchTerm(e.target.value)} />
                         </div>
                     </div>
-                    
+
                     <div style={{marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem'}}>
                         {allOrders === null ? (
                             <p>Loading orders...</p>
@@ -1512,10 +1555,10 @@ const App = () => {
                                         </div>
                                         <div style={{flex: '0 0 200px', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'flex-end'}}>
                                             <div style={{fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--accent-color)'}}>₹{order.total}</div>
-                                            
+
                                             <div style={{width: '100%'}}>
                                                 <label style={{fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem'}}>Update Status:</label>
-                                                <select 
+                                                <select
                                                     style={{width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', background: 'white'}}
                                                     value={order.status || 'Pending'}
                                                     onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
@@ -1534,13 +1577,13 @@ const App = () => {
                                                 </select>
                                             </div>
                                             <div style={{display: 'flex', gap: '0.5rem', width: '100%', marginTop: '0.5rem'}}>
-                                                <button 
+                                                <button
                                                     style={{flex: 1, padding: '0.5rem', background: 'var(--card-bg)', border: '1px solid var(--accent-color)', color: 'var(--accent-color)', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem'}}
                                                     onClick={() => setSelectedReceiptOrder(order)}
                                                 >
                                                     View Receipt
                                                 </button>
-                                                <button 
+                                                <button
                                                     style={{flex: 1, padding: '0.5rem', background: '#fef2f2', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 'var(--radius-sm)', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem'}}
                                                     onClick={() => handleAdminDeleteOrder(order.id)}
                                                 >
@@ -1568,12 +1611,12 @@ const App = () => {
         const defaultReviews = 50 + (Math.abs(idHash) % 150); // e.g. 50 to 199
         const defaultRating = (4.2 + ((Math.abs(idHash) % 6) * 0.1)).toFixed(1); // 4.2 to 4.7
 
-        const reviews = (prod.reviews && prod.reviews !== "0" && prod.reviews !== 0) 
-            ? prod.reviews 
+        const reviews = (prod.reviews && prod.reviews !== "0" && prod.reviews !== 0)
+            ? prod.reviews
             : defaultReviews;
-            
-        const rating = (prod.rating && prod.rating !== 0 && prod.rating !== "0") 
-            ? String(prod.rating) 
+
+        const rating = (prod.rating && prod.rating !== 0 && prod.rating !== "0")
+            ? String(prod.rating)
             : defaultRating;
 
         return { rating, reviews };
@@ -1596,7 +1639,7 @@ const App = () => {
 
     const renderStore = () => {
         const displayedProducts = (products || []).filter(p => selectedCategory === 'All' || p.category === selectedCategory);
-        
+
         return (
         <div className="animate-fade-in store-layout">
             <div className="main-content">
@@ -1606,7 +1649,7 @@ const App = () => {
                     <p className="promo-desc">On Selected Premium Products. Limited time offer!</p>
                     <button className="promo-btn">Shop Now</button>
                 </div>
-                
+
                 <div className="home-categories">
                     {['All', 'Electronics', 'Fashion', 'Home & Kitchen', 'Others'].map((cat, idx) => (
                         <div key={cat} className="home-category-item" onClick={() => setSelectedCategory(cat)}>
@@ -1622,7 +1665,7 @@ const App = () => {
                     <h2 className="section-title">Trending Products</h2>
                     <a href="#" className="view-all">View All</a>
                 </div>
-                
+
                 {products === null ? (
                     <div style={{textAlign: 'center', padding: '4rem 0', color: 'var(--accent-color)'}}>
                         <Icon name="loader" size="48" style={{animation: 'spin 2s linear infinite', marginBottom: '1rem'}} />
@@ -1645,7 +1688,7 @@ const App = () => {
                             const hasDiscount = mrpVal > priceVal;
                             const discountPercent = hasDiscount ? Math.round(((mrpVal - priceVal) / mrpVal) * 100) : 0;
                             const ratingData = getProductRatingData(prod);
-                            
+
                             return (
                             <div className="product-card" key={prod.id} onClick={() => {
                                 setSelectedProduct(prod);
@@ -1655,7 +1698,7 @@ const App = () => {
                                 {hasDiscount && <span className="badge-sale">-{discountPercent}%</span>}
                                 <div className="card-img-container" style={{ position: 'relative' }}>
                                     <img src={prod.image} alt={prod.title} className="card-img" />
-                                    <button 
+                                    <button
                                         type="button"
                                         title="Share Product"
                                         onClick={(e) => {
@@ -1715,9 +1758,9 @@ const App = () => {
                     <div style={{ width: '42px', height: '42px', border: '3px solid #e2e8f0', borderTop: '3px solid var(--accent-color)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 1.5rem auto' }}></div>
                     <h3 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem', fontSize: '1.2rem', fontWeight: '600' }}>Loading Product Details...</h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '320px', margin: '0 auto' }}>Fetching the latest price, photos and reviews.</p>
-                    <button 
-                        className="btn btn-continue" 
-                        style={{ marginTop: '1.5rem', width: 'auto', display: 'inline-block', padding: '0.6rem 1.5rem', fontSize: '0.9rem' }} 
+                    <button
+                        className="btn btn-continue"
+                        style={{ marginTop: '1.5rem', width: 'auto', display: 'inline-block', padding: '0.6rem 1.5rem', fontSize: '0.9rem' }}
                         onClick={() => { setSelectedProduct(null); setCurrentView('store'); }}
                     >
                         Browse All Products
@@ -1726,16 +1769,16 @@ const App = () => {
                 </div>
             );
         }
-        
+
         const ratingData = getProductRatingData(selectedProduct);
         const baseCount = Number(ratingData.reviews) || 128;
         const baseRating = parseFloat(ratingData.rating) || 4.5;
         const realTotalRating = productReviews ? productReviews.reduce((sum, r) => sum + r.rating, 0) : 0;
         const realCount = productReviews ? productReviews.length : 0;
-        
+
         const reviewCount = baseCount + realCount;
         const avgRating = (((baseRating * baseCount) + realTotalRating) / reviewCount).toFixed(1);
-        
+
         const ratingDistribution = {
             5: Math.round(reviewCount * 0.65),
             4: Math.round(reviewCount * 0.22),
@@ -1752,7 +1795,7 @@ const App = () => {
             });
         }
         const totalReviewsText = Math.round(reviewCount * 0.35) + realCount;
-        
+
         const renderStars = (rating) => renderStarIcons(rating, 16);
 
         return (
@@ -1762,7 +1805,7 @@ const App = () => {
                     <Icon name="chevron-right" size="14" />
                     <span style={{color: 'var(--text-primary)'}}>Products</span>
                 </div>
-                
+
                 <div className="product-container">
                     <div>
                         {(!selectedProduct.images || selectedProduct.images.length <= 1) ? (
@@ -1771,7 +1814,7 @@ const App = () => {
                             </div>
                         ) : (
                             <div className="image-carousel-container">
-                                <div 
+                                <div
                                     className="image-carousel"
                                     onScroll={(e) => {
                                         const index = Math.round(e.target.scrollLeft / e.target.offsetWidth);
@@ -1801,8 +1844,8 @@ const App = () => {
                         </div>
                     </div>
                     <div className="product-details">
-                        <h1 
-                            className="product-title-large" 
+                        <h1
+                            className="product-title-large"
                             style={{ margin: '0 0 0.5rem 0', width: '100%', wordBreak: 'break-word', lineHeight: '1.35' }}
                         >
                             {selectedProduct.title}
@@ -1819,8 +1862,8 @@ const App = () => {
                             </div>
 
                             <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                                <button 
-                                    onClick={() => handleShareProduct(selectedProduct)} 
+                                <button
+                                    onClick={() => handleShareProduct(selectedProduct)}
                                     title="Share Product Link"
                                     style={{
                                         display: 'inline-flex',
@@ -1838,8 +1881,8 @@ const App = () => {
                                 >
                                     <Icon name="share-2" size={15} /> Share
                                 </button>
-                                <button 
-                                    onClick={() => handleWhatsAppShare(selectedProduct)} 
+                                <button
+                                    onClick={() => handleWhatsAppShare(selectedProduct)}
                                     title="Share on WhatsApp"
                                     style={{
                                         display: 'inline-flex',
@@ -1865,13 +1908,13 @@ const App = () => {
                             {selectedProduct.mrp && <span className="mrp-price" style={{fontSize: '1.1rem'}}>{selectedProduct.mrp}</span>}
                         </div>
                         <div style={{color: 'var(--success-color)', fontSize: '0.9rem', fontWeight: '500'}}>Inclusive of all taxes</div>
-                        
+
                         <div style={{
-                            display: 'flex', 
-                            justifyContent: 'space-between', 
-                            alignItems: 'center', 
-                            background: '#f4f6f8', 
-                            padding: '1rem', 
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: '#f4f6f8',
+                            padding: '1rem',
                             borderRadius: 'var(--radius-md)',
                             marginTop: '1.25rem',
                             marginBottom: '1.25rem'
@@ -1905,11 +1948,11 @@ const App = () => {
                                 {selectedProduct.description}
                             </p>
                         </div>
-                        
+
                         <div className="divider"></div>
                         <div className="reviews-container">
                             <h2 style={{fontSize: '1.2rem', marginBottom: '1.5rem'}}>Product Ratings & Reviews</h2>
-                            
+
                             <div style={{display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'center', flexWrap: 'wrap'}}>
                                 <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '120px'}}>
                                     <div style={{fontSize: '3rem', fontWeight: '700', color: '#059669', display: 'flex', alignItems: 'center', gap: '0.2rem', lineHeight: '1'}}>
@@ -1938,12 +1981,12 @@ const App = () => {
                                     })}
                                 </div>
                             </div>
-                            
+
                             <div className="divider" style={{marginBottom: '1.5rem'}}></div>
-                            
+
                             {/* Review Form */}
                             {/* Review Form extracted to separate view */}
-                            
+
                             {/* Review List */}
                             {productReviews === null ? (
                                 <p>Loading reviews...</p>
@@ -1989,7 +2032,7 @@ const App = () => {
                                     )})}
                                 </div>
                             )}
-                            
+
                             {/* Add Review Button - Shown ONLY to verified buyers */}
                             {canUserReview && (
                                 <div style={{marginTop: '1.5rem', textAlign: 'center'}}>
@@ -2006,7 +2049,10 @@ const App = () => {
                                             alignItems: 'center',
                                             gap: '8px'
                                         }}
-                                        onClick={() => setCurrentView('add_review')}
+                                        onClick={() => {
+                                            setReviewReturnView('product');
+                                            setCurrentView('add_review');
+                                        }}
                                     >
                                         <Icon name="edit-3" size={16} />
                                         Write a Review
@@ -2029,33 +2075,33 @@ const App = () => {
             <div className="page-container" style={{paddingBottom: '80px', paddingTop: 'env(safe-area-inset-top)'}}>
                 <header className="header" style={{position: 'sticky', top: 0, zIndex: 100, background: 'var(--bg-color)'}}>
                     <div className="nav-actions">
-                        <Icon name="arrow-left" size="24" className="icon-btn" onClick={() => setCurrentView('product')} />
+                        <Icon name="arrow-left" size="24" className="icon-btn" onClick={() => setCurrentView(reviewReturnView || 'product')} />
                     </div>
                     <div className="logo">Write a Review</div>
                     <div className="nav-actions" style={{width: '24px'}}></div>
                 </header>
-                
+
                 <div style={{padding: '1rem'}}>
                     <div style={{display: 'flex', gap: '1rem', marginBottom: '1.5rem', alignItems: 'center', background: 'var(--card-bg)', padding: '0.75rem', borderRadius: 'var(--radius-md)'}}>
-                        <img src={selectedProduct.images && selectedProduct.images[0]} alt={selectedProduct.name} style={{width: '60px', height: '60px', objectFit: 'contain', borderRadius: '4px'}} />
-                        <div style={{fontWeight: '600', fontSize: '0.95rem'}}>{selectedProduct.name}</div>
+                        <img src={(selectedProduct.images && selectedProduct.images[0]) || selectedProduct.image || 'logo.jpg'} alt={selectedProduct.title || selectedProduct.name} style={{width: '60px', height: '60px', objectFit: 'contain', borderRadius: '4px'}} />
+                        <div style={{fontWeight: '600', fontSize: '0.95rem'}}>{selectedProduct.title || selectedProduct.name}</div>
                     </div>
-                    
+
                     <form className="review-form" onSubmit={handleSubmitReview} style={{background: 'white', border: '1px solid var(--border-color)', padding: '1.25rem', borderRadius: 'var(--radius-md)'}}>
                         <div style={{marginBottom: '1.5rem'}}>
                             <label style={{display: 'block', fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem'}}>Overall Rating</label>
                             <div className="star-selector" style={{margin: '0', display: 'flex', gap: '0.5rem'}}>
                                 {[1,2,3,4,5].map(star => (
-                                    <svg 
-                                        key={star} 
-                                        width="36" 
-                                        height="36" 
-                                        viewBox="0 0 24 24" 
-                                        fill={star <= (hoverRating || newReview.rating) ? 'var(--star-color)' : 'none'} 
-                                        stroke={star <= (hoverRating || newReview.rating) ? 'var(--star-color)' : '#9ca3af'} 
-                                        strokeWidth="2" 
-                                        strokeLinecap="round" 
-                                        strokeLinejoin="round" 
+                                    <svg
+                                        key={star}
+                                        width="36"
+                                        height="36"
+                                        viewBox="0 0 24 24"
+                                        fill={star <= (hoverRating || newReview.rating) ? 'var(--star-color)' : 'none'}
+                                        stroke={star <= (hoverRating || newReview.rating) ? 'var(--star-color)' : '#9ca3af'}
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
                                         style={{cursor: 'pointer', transition: 'all 0.15s ease-in-out'}}
                                         onClick={() => setNewReview({...newReview, rating: star})}
                                         onMouseEnter={() => setHoverRating(star)}
@@ -2071,19 +2117,19 @@ const App = () => {
                             <label style={{display: 'block', fontSize: '0.95rem', fontWeight: '500', marginBottom: '0.5rem'}}>Your Name</label>
                             <input type="text" className="form-input" placeholder="Enter your name" value={newReview.userName} onChange={e => setNewReview({...newReview, userName: e.target.value})} required style={{padding: '0.8rem'}} />
                         </div>
-                        
+
                         <div style={{marginBottom: '1.5rem'}}>
                             <label style={{display: 'block', fontSize: '0.95rem', fontWeight: '500', marginBottom: '0.5rem'}}>Detailed Review</label>
                             <textarea className="form-input" rows="4" placeholder="What did you like or dislike? What should other shoppers know?" value={newReview.comment} onChange={e => setNewReview({...newReview, comment: e.target.value})} required style={{padding: '0.8rem'}}></textarea>
                         </div>
-                        
+
                         <div style={{marginBottom: '2rem'}}>
                             <label style={{display: 'block', fontSize: '0.95rem', fontWeight: '500', marginBottom: '0.5rem'}}>Add Photos</label>
                             <label className="photo-upload-btn" style={{margin: '0', display: 'inline-flex', padding: '0.6rem 1rem'}}>
                                 <Icon name="camera" size="18" /> Upload Images
                                 <input type="file" multiple accept="image/*" style={{display: 'none'}} onChange={handleReviewPhotoUpload} />
                             </label>
-                            
+
                             {newReview.photos.length > 0 && (
                                 <div className="review-photos" style={{marginTop: '1rem'}}>
                                     {newReview.photos.map((photo, idx) => (
@@ -2095,7 +2141,7 @@ const App = () => {
                                 </div>
                             )}
                         </div>
-                        
+
                         <button type="submit" className="btn-auth" style={{width: '100%', padding: '1rem', fontSize: '1rem', borderRadius: '8px'}} disabled={isSubmittingReview}>
                             {isSubmittingReview ? "Submitting..." : "Submit Review"}
                         </button>
@@ -2186,8 +2232,8 @@ const App = () => {
                                 </div>
                                 <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem'}}>
                                     {savedAddresses.map((addr, idx) => (
-                                        <div 
-                                            key={idx} 
+                                        <div
+                                            key={idx}
                                             onClick={() => setSelectedAddressIndex(idx)}
                                             style={{
                                                 border: selectedAddressIndex === idx ? '2px solid var(--accent-color)' : '1px solid var(--border-color)',
@@ -2234,31 +2280,31 @@ const App = () => {
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Mobile Number</label>
-                                            <input 
-                                                type="tel" 
-                                                name="phone" 
-                                                value={orderFormData.phone} 
-                                                onChange={handleOrderInputChange} 
+                                            <input
+                                                type="tel"
+                                                name="phone"
+                                                value={orderFormData.phone}
+                                                onChange={handleOrderInputChange}
                                                 onInput={(e) => e.target.value = e.target.value.replace(/[^0-9]/g, '')}
-                                                className="form-input" 
-                                                required={isAddingNewAddress} 
-                                                pattern="[6-9][0-9]{9}" 
-                                                maxLength="10" 
-                                                title="Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9" 
+                                                className="form-input"
+                                                required={isAddingNewAddress}
+                                                pattern="[6-9][0-9]{9}"
+                                                maxLength="10"
+                                                title="Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9"
                                             />
                                         </div>
                                         {!currentUser && (
                                             <div className="form-group full-width">
                                                 <label className="form-label">Email Address (To track orders)</label>
-                                                <input 
-                                                    type="email" 
-                                                    name="email" 
-                                                    value={orderFormData.email} 
-                                                    onChange={handleOrderInputChange} 
-                                                    className="form-input" 
-                                                    required={isAddingNewAddress} 
-                                                    pattern="[a-zA-Z0-9._%+\-]+@gmail\.com$" 
-                                                    title="Please enter a valid Google Mail address (e.g., name@gmail.com)" 
+                                                <input
+                                                    type="email"
+                                                    name="email"
+                                                    value={orderFormData.email}
+                                                    onChange={handleOrderInputChange}
+                                                    className="form-input"
+                                                    required={isAddingNewAddress}
+                                                    pattern="[a-zA-Z0-9._%+\-]+@gmail\.com$"
+                                                    title="Please enter a valid Google Mail address (e.g., name@gmail.com)"
                                                 />
                                             </div>
                                         )}
@@ -2277,17 +2323,17 @@ const App = () => {
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Pincode</label>
-                                            <input 
-                                                type="text" 
-                                                name="pincode" 
-                                                value={orderFormData.pincode} 
-                                                onChange={handleOrderInputChange} 
+                                            <input
+                                                type="text"
+                                                name="pincode"
+                                                value={orderFormData.pincode}
+                                                onChange={handleOrderInputChange}
                                                 onInput={(e) => e.target.value = e.target.value.replace(/[^0-9]/g, '')}
-                                                className="form-input" 
-                                                required={isAddingNewAddress} 
-                                                pattern="[1-9][0-9]{5}" 
-                                                maxLength="6" 
-                                                title="Please enter a valid 6-digit PIN code" 
+                                                className="form-input"
+                                                required={isAddingNewAddress}
+                                                pattern="[1-9][0-9]{5}"
+                                                maxLength="6"
+                                                title="Please enter a valid 6-digit PIN code"
                                             />
                                         </div>
                                         <div className="form-group">
@@ -2349,7 +2395,7 @@ const App = () => {
                 <div>
                     <div className="checkout-summary">
                         <h3 style={{marginBottom: '1.5rem', fontSize: '1.2rem'}}>Order Summary</h3>
-                        
+
                         {itemsToCheckout.map(item => (
                             <div className="summary-product" key={item.id} style={{marginBottom: '1rem', paddingBottom: '1rem'}}>
                                 <img src={item.image} className="summary-img" alt="Product" />
@@ -2359,12 +2405,12 @@ const App = () => {
                                 </div>
                             </div>
                         ))}
-                        
+
                         <div className="summary-item total">
                             <span>Order Total:</span>
                             <span>₹{orderTotal}</span>
                         </div>
-                        
+
                         <div style={{display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', padding: '0.75rem', borderRadius: 'var(--radius-sm)'}}>
                             <Icon name="shield-check" size="24" />
                             <div>
@@ -2405,7 +2451,7 @@ const App = () => {
     return (
         <div>
             {renderHeader()}
-            
+
             <main>
                 {currentView === 'store' && renderStore()}
                 {currentView === 'login' && renderLogin()}
@@ -2415,7 +2461,19 @@ const App = () => {
                 {currentView === 'cart' && renderCart()}
                 {currentView === 'checkout' && renderCheckout()}
                 {currentView === 'success' && renderSuccess()}
-                {currentView === 'myorders' && <MyOrdersView currentUser={currentUser} setCurrentView={setCurrentView} handleCancelOrder={handleCancelOrder} handleReturnOrder={handleReturnOrder} setSelectedReceiptOrder={setSelectedReceiptOrder} />}
+                {currentView === 'myorders' && (
+                    <MyOrdersView
+                        currentUser={currentUser}
+                        setCurrentView={setCurrentView}
+                        handleCancelOrder={handleCancelOrder}
+                        handleReturnOrder={handleReturnOrder}
+                        setSelectedReceiptOrder={setSelectedReceiptOrder}
+                        products={products}
+                        setSelectedProduct={setSelectedProduct}
+                        setCanUserReview={setCanUserReview}
+                        setReviewReturnView={setReviewReturnView}
+                    />
+                )}
             </main>
 
             {/* Mobile Bottom Navigation - Hide on product detail to prevent overlap with sticky action buttons */}
@@ -2465,34 +2523,73 @@ const App = () => {
             </div>
 
             {selectedReceiptOrder && (
-                <ReceiptModal 
-                    order={selectedReceiptOrder} 
-                    onClose={() => setSelectedReceiptOrder(null)} 
+                <ReceiptModal
+                    order={selectedReceiptOrder}
+                    onClose={() => setSelectedReceiptOrder(null)}
                 />
             )}
         </div>
     );
 };
 
-const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleReturnOrder, setSelectedReceiptOrder }) => {
+const MyOrdersView = ({
+    currentUser,
+    setCurrentView,
+    handleCancelOrder,
+    handleReturnOrder,
+    setSelectedReceiptOrder,
+    products,
+    setSelectedProduct,
+    setCanUserReview,
+    setReviewReturnView
+}) => {
     const [orders, setOrders] = React.useState(null);
     const [selectedOrderDetails, setSelectedOrderDetails] = React.useState(null);
 
     React.useEffect(() => {
-        if (!currentUser) return;
-        
+        let userEmail = currentUser && currentUser.email ? currentUser.email : null;
+        if (!userEmail) {
+            try {
+                const saved = localStorage.getItem("expoz_user");
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed && parsed.email) userEmail = parsed.email;
+                }
+            } catch(e) {}
+        }
+
         const fetchOrders = async () => {
             let localOrders = [];
             try {
-                localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${currentUser.email}`) || '[]');
-                if (Array.isArray(localOrders) && localOrders.length > 0) setOrders(localOrders);
+                if (userEmail) {
+                    localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
+                }
+                if (localOrders.length === 0) {
+                    // Check all stored orders in localStorage
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (k && k.startsWith('expoz_orders_')) {
+                            const found = JSON.parse(localStorage.getItem(k) || '[]');
+                            if (Array.isArray(found)) localOrders.push(...found);
+                        }
+                    }
+                }
+                if (Array.isArray(localOrders) && localOrders.length > 0) {
+                    const uniqueOrders = Array.from(new Map(localOrders.map(o => [o.orderId || o.id, o])).values());
+                    setOrders(uniqueOrders);
+                }
             } catch(e){}
+
+            if (!userEmail) {
+                if (localOrders.length === 0) setOrders([]);
+                return;
+            }
 
             try {
                 const snapshot = await firebase.firestore().collection('orders')
-                    .where('email', '==', currentUser.email)
+                    .where('email', '==', userEmail)
                     .get();
-                
+
                 const fetchedOrders = [];
                 snapshot.forEach(doc => {
                     fetchedOrders.push({ id: doc.id, ...doc.data() });
@@ -2505,7 +2602,7 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                 });
 
                 setOrders(fetchedOrders);
-                localStorage.setItem(`expoz_orders_${currentUser.email}`, JSON.stringify(fetchedOrders));
+                localStorage.setItem(`expoz_orders_${userEmail}`, JSON.stringify(fetchedOrders));
             } catch (err) {
                 console.error("Error fetching orders:", err);
                 if (localOrders.length > 0) {
@@ -2518,6 +2615,55 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
         fetchOrders();
     }, [currentUser]);
 
+    const handleReviewItem = (prod) => {
+        if (!prod) return;
+        if (setSelectedProduct) setSelectedProduct(prod);
+        if (setCanUserReview) setCanUserReview(true);
+        if (setReviewReturnView) setReviewReturnView('myorders');
+        setCurrentView('add_review');
+        window.scrollTo(0, 0);
+    };
+
+    const parsedOrderItems = React.useMemo(() => {
+        if (!selectedOrderDetails) return [];
+        const productsStr = selectedOrderDetails.products || '';
+        const rawItems = productsStr.split(',').map(s => s.trim()).filter(Boolean);
+        const pIds = selectedOrderDetails.productIds || [];
+
+        return rawItems.map((itemStr, idx) => {
+            const qtyMatch = itemStr.match(/\(x(\d+)\)$/);
+            const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+            const title = itemStr.replace(/\s*\(x\d+\)$/, '').trim();
+            const pId = pIds[idx] ? String(pIds[idx]) : null;
+
+            let matchedProduct = null;
+            if (pId && products) {
+                matchedProduct = products.find(p => String(p.id) === String(pId));
+            }
+            if (!matchedProduct && title && products) {
+                const cleanTitle = title.toLowerCase();
+                matchedProduct = products.find(p => {
+                    const t = (p.title || p.name || '').toLowerCase();
+                    return t.includes(cleanTitle) || cleanTitle.includes(t);
+                });
+            }
+
+            const finalProd = matchedProduct || {
+                id: pId || ('order_item_' + idx),
+                title: title,
+                name: title,
+                image: 'logo.jpg',
+                images: []
+            };
+
+            return {
+                title,
+                qty,
+                product: finalProd
+            };
+        });
+    }, [selectedOrderDetails, products]);
+
     if (selectedOrderDetails) {
         return (
             <div className="animate-fade-in store-layout" style={{ display: 'block' }}>
@@ -2526,7 +2672,7 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                     <Icon name="chevron-right" size="14" />
                     <span style={{color: 'var(--text-primary)'}}>Order Details</span>
                 </div>
-                
+
                 <div style={{background: 'var(--card-bg)', padding: '1.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)'}}>
                     <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1rem'}}>
                         <div>
@@ -2538,12 +2684,70 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                             <div style={{fontWeight: '700', color: 'var(--accent-color)'}}>₹{selectedOrderDetails.total}</div>
                         </div>
                     </div>
-                    
+
                     <div style={{marginBottom: '1rem'}}>
-                        <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>Items:</div>
-                        <div style={{fontSize: '0.95rem', color: 'var(--text-secondary)'}}>{selectedOrderDetails.products}</div>
+                        <div style={{fontWeight: '600', marginBottom: '0.75rem'}}>Ordered Items:</div>
+                        <div style={{display: 'flex', flexDirection: 'column', gap: '0.75rem'}}>
+                            {parsedOrderItems && parsedOrderItems.length > 0 ? (
+                                parsedOrderItems.map((item, idx) => {
+                                    const prodImg = (item.product && item.product.image) || (item.product && item.product.images && item.product.images[0]) || 'logo.jpg';
+                                    const canReviewThis = checkIsProductPurchased ? checkIsProductPurchased(item.product.id, item.title) : true;
+
+                                    return (
+                                        <div key={idx} style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            padding: '0.75rem',
+                                            background: 'var(--bg-primary, #f9fafb)',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: 'var(--radius-sm, 6px)',
+                                            gap: '1rem',
+                                            flexWrap: 'wrap'
+                                        }}>
+                                            <div style={{display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 200px'}}>
+                                                <img
+                                                    src={prodImg}
+                                                    alt={item.title}
+                                                    style={{width: '46px', height: '46px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0}}
+                                                    onError={(e) => { e.target.src = 'logo.jpg'; }}
+                                                />
+                                                <div>
+                                                    <div style={{fontWeight: '600', fontSize: '0.95rem', color: 'var(--text-primary)'}}>{item.title}</div>
+                                                    <div style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>Quantity: {item.qty}</div>
+                                                </div>
+                                            </div>
+                                            {canReviewThis && (
+                                                <button
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.35rem',
+                                                        background: 'var(--accent-color)',
+                                                        color: '#fff',
+                                                        border: 'none',
+                                                        padding: '0.4rem 0.85rem',
+                                                        borderRadius: 'var(--radius-sm, 4px)',
+                                                        fontSize: '0.82rem',
+                                                        fontWeight: '600',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                    onClick={() => handleReviewItem(item.product)}
+                                                >
+                                                    <Icon name="star" size="14" fill="#fff" stroke="#fff" />
+                                                    Write Review
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            ) : (
+                                <div style={{fontSize: '0.95rem', color: 'var(--text-secondary)'}}>{selectedOrderDetails.products}</div>
+                            )}
+                        </div>
                     </div>
-                    
+
                     <div style={{marginBottom: '1rem'}}>
                         <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>Delivery Details:</div>
                         <div style={{fontSize: '0.95rem', color: 'var(--text-secondary)'}}>
@@ -2557,7 +2761,7 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                                     .replace(/City:\s*/gi, '')
                                     .replace(/State:\s*/gi, '')
                                     .replace(/PIN:\s*/gi, '');
-                                
+
                                 cleanAddress = cleanAddress.replace(/,\s*,/g, ',').replace(/^[,\s]+/, '').replace(/[,\s]+$/, '');
                                 return <div style={{marginBottom: '0.25rem', lineHeight: '1.4'}}>{cleanAddress}</div>;
                             })()}
@@ -2598,7 +2802,7 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                                             {isCancelled && (
                                                 <div className="tracking-timeline-progress" style={{ height: '0%' }}></div>
                                             )}
-                                            
+
                                             {steps.map((step, idx) => {
                                                 const isActive = idx === progressIndex;
                                                 const isCompleted = idx < progressIndex;
@@ -2629,17 +2833,17 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                                 })()}
                             </div>
                         </div>
-                        
+
                         <div style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '1rem'}}>
                         <div style={{display: 'flex', gap: '0.5rem'}}>
-                            <button 
+                            <button
                                 style={{background: 'none', border: '1px solid var(--accent-color)', color: 'var(--accent-color)', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer'}}
                                 onClick={() => setSelectedReceiptOrder(selectedOrderDetails)}
                             >
                                 Receipt
                             </button>
                             {(!selectedOrderDetails.status || selectedOrderDetails.status === 'Pending' || selectedOrderDetails.status === 'Processing') && (
-                                <button 
+                                <button
                                     style={{background: 'none', border: '1px solid #ef4444', color: '#ef4444', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer'}}
                                     onClick={async () => {
                                         const success = await handleCancelOrder(selectedOrderDetails);
@@ -2651,9 +2855,9 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                                     Request Cancellation
                                 </button>
                             )}
-                            {selectedOrderDetails.status === 'Delivered' && 
+                            {selectedOrderDetails.status === 'Delivered' &&
                              (!selectedOrderDetails.deliveredAt || ((new Date().getTime() - new Date(selectedOrderDetails.deliveredAt).getTime()) / (1000 * 3600 * 24) <= 7)) && (
-                                <button 
+                                <button
                                     style={{background: 'none', border: '1px solid #eab308', color: '#eab308', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem'}}
                                     onClick={async () => {
                                         const success = await handleReturnOrder(selectedOrderDetails);
@@ -2678,7 +2882,7 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                 <Icon name="package" size="28" style={{color: 'var(--accent-color)'}} />
                 <h2 style={{ fontSize: '1.5rem' }}>My Orders</h2>
             </div>
-            
+
             {orders === null ? (
                 <div style={{textAlign: 'center', padding: '4rem 0'}}>Loading orders...</div>
             ) : orders.length === 0 ? (
@@ -2708,12 +2912,12 @@ const MyOrdersView = ({ currentUser, setCurrentView, handleCancelOrder, handleRe
                             </div>
                             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                                 <div style={{
-                                    display: 'inline-block', 
-                                    padding: '0.25rem 0.75rem', 
-                                    background: order.status === 'Cancelled' ? '#fecdd3' : (order.status === 'Delivered' ? '#dcfce7' : '#fef9c3'), 
-                                    color: order.status === 'Cancelled' ? '#9f1239' : (order.status === 'Delivered' ? '#166534' : '#854d0e'), 
-                                    borderRadius: 'var(--radius-sm)', 
-                                    fontSize: '0.8rem', 
+                                    display: 'inline-block',
+                                    padding: '0.25rem 0.75rem',
+                                    background: order.status === 'Cancelled' ? '#fecdd3' : (order.status === 'Delivered' ? '#dcfce7' : '#fef9c3'),
+                                    color: order.status === 'Cancelled' ? '#9f1239' : (order.status === 'Delivered' ? '#166534' : '#854d0e'),
+                                    borderRadius: 'var(--radius-sm)',
+                                    fontSize: '0.8rem',
                                     fontWeight: 'bold'
                                 }}>
                                     {order.status || 'Pending'}
@@ -2753,8 +2957,8 @@ const ReceiptModal = ({ order, onClose }) => {
 
     return (
         <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
-            backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, 
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             padding: '1rem', overflowY: 'auto'
         }}>
@@ -2801,14 +3005,14 @@ const ReceiptModal = ({ order, onClose }) => {
                         <div style={{fontSize: '1rem', fontWeight: 700, color: 'black'}}>TOTAL</div>
                         <div style={{fontSize: '1.2rem', fontWeight: 800, color: 'black'}}>₹{order.total}</div>
                     </div>
-                    
+
                     <div style={{textAlign: 'center', marginTop: '2rem', fontSize: '0.75rem', color: '#666'}}>
                         Thank you for shopping with us!
                     </div>
                 </div>
 
                 <div style={{padding: '1rem', textAlign: 'center'}}>
-                    <button 
+                    <button
                         onClick={handleDownload}
                         disabled={isDownloading}
                         style={{
