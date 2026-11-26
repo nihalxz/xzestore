@@ -118,8 +118,7 @@ const App = () => {
     const [newReview, setNewReview] = useState({ rating: 0, comment: "", photos: [], userName: "" });
     const [hoverRating, setHoverRating] = useState(0);
     const [isSubmittingReview, setIsSubmittingReview] = useState(false);
-    const [isCheckingReviewEligibility, setIsCheckingReviewEligibility] = useState(false);
-    const [reviewBlockedModal, setReviewBlockedModal] = useState(false);
+    const [canUserReview, setCanUserReview] = useState(false);
     const [orderId, setOrderId] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -398,91 +397,115 @@ const App = () => {
         });
     };
 
-    // Verified Buyer Check for Reviews
-    const handleOpenAddReview = async () => {
-        if (!selectedProduct) return;
+    // Check if the current user has purchased the selected product (Verified Buyer for reviews)
+    useEffect(() => {
+        let isMounted = true;
 
-        // 1. If not logged in, prompt user to login
-        if (!currentUser || !currentUser.email) {
-            showToast("Please log in with the email used during checkout to write a review");
-            setCurrentView('login');
-            return;
-        }
+        const checkReviewEligibility = async () => {
+            if (!selectedProduct) {
+                if (isMounted) setCanUserReview(false);
+                return;
+            }
 
-        // Admin can always review for testing
-        if (currentUser.role === 'admin') {
-            setCurrentView('add_review');
-            return;
-        }
+            // Admin can always review for testing
+            if (currentUser && currentUser.role === 'admin') {
+                if (isMounted) setCanUserReview(true);
+                return;
+            }
 
-        setIsCheckingReviewEligibility(true);
-        try {
-            const userEmail = currentUser.email.toLowerCase().trim();
-            const prodId = String(selectedProduct.id);
-            const prodTitle = selectedProduct.title ? selectedProduct.title.toLowerCase().trim() : '';
-
-            // Check 1: LocalStorage purchased list
-            let hasPurchased = false;
-            try {
-                const purchasedList = JSON.parse(localStorage.getItem(`expoz_purchased_${userEmail}`) || '[]');
-                if (purchasedList.includes(prodId)) {
-                    hasPurchased = true;
-                }
-            } catch(e) {}
-
-            // Check 2: LocalStorage orders list
-            if (!hasPurchased) {
+            // Determine user email from currentUser or localStorage
+            let userEmail = currentUser && currentUser.email ? currentUser.email : null;
+            if (!userEmail) {
                 try {
-                    const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
-                    const found = localOrders.find(ord => {
-                        const status = (ord.status || '').toLowerCase();
-                        if (status.includes('cancel') || status.includes('return')) return false;
-                        if (ord.productIds && ord.productIds.includes(prodId)) return true;
-                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) return true;
-                        return false;
-                    });
-                    if (found) hasPurchased = true;
+                    const saved = localStorage.getItem("expoz_user");
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (parsed && parsed.email) userEmail = parsed.email;
+                    }
                 } catch(e) {}
             }
 
-            // Check 3: Firestore orders collection
-            if (!hasPurchased) {
+            if (!userEmail) {
+                if (isMounted) setCanUserReview(false);
+                return;
+            }
+
+            userEmail = userEmail.toLowerCase().trim();
+            const prodId = String(selectedProduct.id);
+            const prodTitle = selectedProduct.title ? selectedProduct.title.toLowerCase().trim() : '';
+
+            // Check 1: LocalStorage purchased list (instant)
+            try {
+                const purchasedList = JSON.parse(localStorage.getItem(`expoz_purchased_${userEmail}`) || '[]');
+                if (purchasedList.includes(prodId)) {
+                    if (isMounted) setCanUserReview(true);
+                    return;
+                }
+            } catch(e) {}
+
+            // Check 2: LocalStorage cached orders (instant)
+            try {
+                const localOrders = JSON.parse(localStorage.getItem(`expoz_orders_${userEmail}`) || '[]');
+                const found = localOrders.find(ord => {
+                    const status = (ord.status || '').toLowerCase();
+                    if (status.includes('cancel') || status.includes('return')) return false;
+                    if (ord.productIds && ord.productIds.includes(prodId)) return true;
+                    if (ord.products && ord.products.toLowerCase().includes(prodTitle)) return true;
+                    return false;
+                });
+                if (found) {
+                    if (isMounted) setCanUserReview(true);
+                    try {
+                        const purchasedKey = `expoz_purchased_${userEmail}`;
+                        const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                        if (!existing.includes(prodId)) {
+                            existing.push(prodId);
+                            localStorage.setItem(purchasedKey, JSON.stringify(existing));
+                        }
+                    } catch(e) {}
+                    return;
+                }
+            } catch(e) {}
+
+            // Check 3: Check Firestore orders in background
+            try {
                 const snap = await db.collection('orders')
                     .where('email', '==', userEmail)
                     .get();
 
+                let hasBought = false;
                 snap.forEach(doc => {
                     const ord = doc.data();
                     const status = (ord.status || '').toLowerCase();
                     if (!status.includes('cancel') && !status.includes('return')) {
-                        if (ord.productIds && ord.productIds.includes(prodId)) hasPurchased = true;
-                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) hasPurchased = true;
+                        if (ord.productIds && ord.productIds.includes(prodId)) hasBought = true;
+                        if (ord.products && ord.products.toLowerCase().includes(prodTitle)) hasBought = true;
                     }
                 });
-            }
 
-            if (hasPurchased) {
-                // Cache purchase flag for fast future checks
-                try {
-                    const purchasedKey = `expoz_purchased_${userEmail}`;
-                    const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
-                    if (!existing.includes(prodId)) {
-                        existing.push(prodId);
-                        localStorage.setItem(purchasedKey, JSON.stringify(existing));
-                    }
-                } catch(e) {}
-
-                setCurrentView('add_review');
-            } else {
-                setReviewBlockedModal(true);
+                if (hasBought) {
+                    if (isMounted) setCanUserReview(true);
+                    try {
+                        const purchasedKey = `expoz_purchased_${userEmail}`;
+                        const existing = JSON.parse(localStorage.getItem(purchasedKey) || '[]');
+                        if (!existing.includes(prodId)) {
+                            existing.push(prodId);
+                            localStorage.setItem(purchasedKey, JSON.stringify(existing));
+                        }
+                    } catch(e) {}
+                } else {
+                    if (isMounted) setCanUserReview(false);
+                }
+            } catch(err) {
+                console.warn("Could not verify purchase from Firestore:", err);
+                if (isMounted) setCanUserReview(false);
             }
-        } catch(err) {
-            console.error("Error verifying purchase:", err);
-            setReviewBlockedModal(true);
-        } finally {
-            setIsCheckingReviewEligibility(false);
-        }
-    };
+        };
+
+        checkReviewEligibility();
+
+        return () => { isMounted = false; };
+    }, [selectedProduct, currentUser]);
 
     const handleSubmitReview = async (e) => {
         e.preventDefault();
@@ -534,7 +557,6 @@ const App = () => {
 
             if (!verified) {
                 showToast("Only verified buyers can submit reviews.");
-                setReviewBlockedModal(true);
                 return;
             }
         }
@@ -1968,37 +1990,29 @@ const App = () => {
                                 </div>
                             )}
                             
-                            {/* Add Review Button */}
-                            <div style={{marginTop: '1.5rem', textAlign: 'center'}}>
-                                <button 
-                                    className="btn-auth" 
-                                    style={{
-                                        width: 'auto', 
-                                        padding: '0.75rem 2rem', 
-                                        background: 'white', 
-                                        color: 'var(--accent-color)', 
-                                        border: '1.5px solid var(--accent-color)', 
-                                        fontWeight: '600',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '8px'
-                                    }} 
-                                    onClick={handleOpenAddReview}
-                                    disabled={isCheckingReviewEligibility}
-                                >
-                                    {isCheckingReviewEligibility ? (
-                                        <>
-                                            <Icon name="loader" size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                                            Verifying Purchase...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Icon name="edit-3" size={16} />
-                                            Write a Review
-                                        </>
-                                    )}
-                                </button>
-                            </div>
+                            {/* Add Review Button - Shown ONLY to verified buyers */}
+                            {canUserReview && (
+                                <div style={{marginTop: '1.5rem', textAlign: 'center'}}>
+                                    <button
+                                        className="btn-auth"
+                                        style={{
+                                            width: 'auto',
+                                            padding: '0.75rem 2rem',
+                                            background: 'white',
+                                            color: 'var(--accent-color)',
+                                            border: '1.5px solid var(--accent-color)',
+                                            fontWeight: '600',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '8px'
+                                        }}
+                                        onClick={() => setCurrentView('add_review')}
+                                    >
+                                        <Icon name="edit-3" size={16} />
+                                        Write a Review
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -2455,84 +2469,6 @@ const App = () => {
                     order={selectedReceiptOrder} 
                     onClose={() => setSelectedReceiptOrder(null)} 
                 />
-            )}
-
-            {reviewBlockedModal && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0, 0, 0, 0.65)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 99999,
-                    padding: '1.25rem'
-                }}>
-                    <div style={{
-                        background: 'white',
-                        borderRadius: '16px',
-                        padding: '2rem 1.5rem',
-                        maxWidth: '380px',
-                        width: '100%',
-                        textAlign: 'center',
-                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
-                        animation: 'fadeIn 0.2s ease forwards'
-                    }}>
-                        <div style={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: '50%',
-                            background: '#fee2e2',
-                            color: '#ef4444',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 1.25rem auto'
-                        }}>
-                            <Icon name="shield-alert" size={30} />
-                        </div>
-                        
-                        <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.6rem' }}>
-                            Verified Buyers Only
-                        </h3>
-                        
-                        <p style={{ fontSize: '0.9rem', color: '#64748b', lineHeight: '1.5', marginBottom: '1.5rem' }}>
-                            വ്യാജ റിവ്യൂകൾ ഒഴിവാക്കാൻ, ഈ പ്രൊഡക്റ്റ് വാങ്ങിയ കസ്റ്റമേഴ്സിന് മാത്രമേ റിവ്യൂ എഴുതാൻ സാധിക്കുകയുള്ളൂ.
-                        </p>
-                        
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                            <button
-                                className="btn btn-buy"
-                                style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', fontSize: '0.95rem' }}
-                                onClick={() => {
-                                    setReviewBlockedModal(false);
-                                    if (selectedProduct) handleBuyNow(selectedProduct);
-                                }}
-                            >
-                                <Icon name="zap" size={16} /> Buy This Product
-                            </button>
-                            <button
-                                style={{
-                                    width: '100%',
-                                    padding: '0.7rem',
-                                    background: '#f1f5f9',
-                                    border: 'none',
-                                    borderRadius: '10px',
-                                    color: '#475569',
-                                    fontWeight: '600',
-                                    fontSize: '0.9rem',
-                                    cursor: 'pointer'
-                                }}
-                                onClick={() => setReviewBlockedModal(false)}
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
             )}
         </div>
     );
