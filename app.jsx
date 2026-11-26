@@ -1650,69 +1650,63 @@ const App = () => {
                         </div>
                     </div>
                     <div className="product-details">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', minWidth: 0 }}>
-                            <h1 
-                                className="product-title-large" 
-                                title={selectedProduct.title}
-                                style={{ margin: 0, flex: 1, minWidth: 0 }}
-                            >
-                                {selectedProduct.title}
-                            </h1>
-                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                        <h1 
+                            className="product-title-large" 
+                            style={{ margin: '0 0 0.5rem 0', width: '100%', wordBreak: 'break-word', lineHeight: '1.35' }}
+                        >
+                            {selectedProduct.title}
+                        </h1>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                            <div className="card-rating" style={{ fontSize: '0.85rem', padding: '0', margin: '0' }}>
+                                <div style={{ display: 'flex', color: 'var(--star-color)', alignItems: 'center', gap: '4px' }}>
+                                    {avgRating > 0 && <span style={{ fontWeight: 'bold', fontSize: '1rem', color: '#111827' }}>{avgRating}</span>}
+                                    <div style={{ display: 'flex' }}>
+                                        {renderStars(avgRating)}
+                                    </div>
+                                </div>
+                                <span className="rating-count" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>({reviewCount} Ratings)</span>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                                 <button 
                                     onClick={() => handleShareProduct(selectedProduct)} 
                                     title="Share Product Link"
-                                    className="btn-share-round"
                                     style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '4px',
+                                        gap: '5px',
                                         background: '#f1f5f9',
                                         border: '1px solid #cbd5e1',
-                                        padding: '6px 10px',
+                                        padding: '6px 12px',
                                         borderRadius: '20px',
                                         cursor: 'pointer',
                                         color: '#334155',
                                         fontWeight: '600',
-                                        fontSize: '0.78rem'
+                                        fontSize: '0.8rem'
                                     }}
                                 >
-                                    <Icon name="share-2" size={15} />
-                                    <span className="share-btn-text">Share</span>
+                                    <Icon name="share-2" size={15} /> Share
                                 </button>
                                 <button 
                                     onClick={() => handleWhatsAppShare(selectedProduct)} 
                                     title="Share on WhatsApp"
-                                    className="btn-whatsapp-round"
                                     style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '4px',
+                                        gap: '5px',
                                         background: '#25D366',
                                         color: '#ffffff',
                                         border: 'none',
-                                        padding: '6px 10px',
+                                        padding: '6px 12px',
                                         borderRadius: '20px',
                                         cursor: 'pointer',
                                         fontWeight: '600',
-                                        fontSize: '0.78rem'
+                                        fontSize: '0.8rem'
                                     }}
                                 >
-                                    <Icon name="message-circle" size={15} />
-                                    <span className="share-btn-text">WhatsApp</span>
+                                    <Icon name="message-circle" size={15} /> WhatsApp
                                 </button>
                             </div>
-                        </div>
-                        <div className="card-rating" style={{fontSize: '0.85rem', padding: '0.2rem 0'}}>
-                            <div style={{display: 'flex', color: 'var(--star-color)', alignItems: 'center', gap: '4px'}}>
-                                {avgRating > 0 && <span style={{fontWeight: 'bold', fontSize: '1rem', color: '#111827'}}>{avgRating}</span>}
-                                <div style={{display: 'flex'}}>
-                                    {renderStars(avgRating)}
-                                </div>
-                            </div>
-                            <span className="rating-count" style={{color: 'var(--text-secondary)', fontSize: '0.85rem'}}>({reviewCount} Ratings)</span>
                         </div>
                         <div className="divider"></div>
                         <div style={{display: 'flex', alignItems: 'baseline', gap: '1rem', margin: '0.5rem 0'}}>
