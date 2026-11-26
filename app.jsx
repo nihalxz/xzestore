@@ -1650,46 +1650,58 @@ const App = () => {
                         </div>
                     </div>
                     <div className="product-details">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.35rem' }}>
-                            <h1 className="product-title-large" style={{ margin: 0, flex: 1 }}>{selectedProduct.title}</h1>
-                            <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                            <h1 
+                                className="product-title-large" 
+                                title={selectedProduct.title}
+                                style={{ margin: 0, flex: 1, minWidth: 0 }}
+                            >
+                                {selectedProduct.title}
+                            </h1>
+                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
                                 <button 
                                     onClick={() => handleShareProduct(selectedProduct)} 
                                     title="Share Product Link"
+                                    className="btn-share-round"
                                     style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        gap: '5px',
+                                        justifyContent: 'center',
+                                        gap: '4px',
                                         background: '#f1f5f9',
                                         border: '1px solid #cbd5e1',
-                                        padding: '7px 12px',
+                                        padding: '6px 10px',
                                         borderRadius: '20px',
                                         cursor: 'pointer',
                                         color: '#334155',
                                         fontWeight: '600',
-                                        fontSize: '0.8rem'
+                                        fontSize: '0.78rem'
                                     }}
                                 >
-                                    <Icon name="share-2" size={15} /> Share
+                                    <Icon name="share-2" size={15} />
+                                    <span className="share-btn-text">Share</span>
                                 </button>
                                 <button 
                                     onClick={() => handleWhatsAppShare(selectedProduct)} 
                                     title="Share on WhatsApp"
+                                    className="btn-whatsapp-round"
                                     style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
-                                        gap: '5px',
+                                        justifyContent: 'center',
+                                        gap: '4px',
                                         background: '#25D366',
                                         color: '#ffffff',
                                         border: 'none',
-                                        padding: '7px 12px',
+                                        padding: '6px 10px',
                                         borderRadius: '20px',
                                         cursor: 'pointer',
                                         fontWeight: '600',
-                                        fontSize: '0.8rem'
+                                        fontSize: '0.78rem'
                                     }}
                                 >
-                                    <Icon name="message-circle" size={15} /> WhatsApp
+                                    <Icon name="message-circle" size={15} />
+                                    <span className="share-btn-text">WhatsApp</span>
                                 </button>
                             </div>
                         </div>
