@@ -913,6 +913,13 @@ const App = () => {
         }
         try {
             await db.collection('orders').doc(orderId).delete();
+            // Also delete from Google Sheet
+            fetch("https://script.google.com/macros/s/AKfycbwpPGzU_hDD3vN_lkrbc8_m6SAJ5_HCxGowzHczg_ZDjIJWPMw8T7gKPr1VTOtGTxAU/exec", {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "delete", orderId: orderId })
+            }).catch(e => console.error("Sheet delete error:", e));
             showToast("Order permanently deleted!");
         } catch (error) {
             console.error("Error deleting order:", error);
