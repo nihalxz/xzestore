@@ -992,16 +992,18 @@ const App = () => {
     };
 
     // ---- Store & Cart Logic ----
+    const [productQty, setProductQty] = React.useState(1);
+
     const handleAddToCart = (e) => {
         if(e) e.stopPropagation();
         if (!selectedProduct) return;
-
+        const addQty = productQty || 1;
         setCart(prev => {
             const exists = prev.find(item => item.id === selectedProduct.id);
             if (exists) {
-                return prev.map(item => item.id === selectedProduct.id ? { ...item, qty: item.qty + 1 } : item);
+                return prev.map(item => item.id === selectedProduct.id ? { ...item, qty: item.qty + addQty } : item);
             }
-            return [...prev, { ...selectedProduct, qty: 1 }];
+            return [...prev, { ...selectedProduct, qty: addQty }];
         });
         showToast("Product added to cart");
     };
@@ -1016,6 +1018,12 @@ const App = () => {
         setCheckoutMode('single');
         setCurrentView("checkout");
         window.scrollTo(0, 0);
+    };
+
+    const handleUpdateCartQty = (id, delta) => {
+        setCart(prev => prev
+            .map(item => item.id === id ? { ...item, qty: Math.max(1, item.qty + delta) } : item)
+        );
     };
 
     const handleCartCheckout = () => {
@@ -2216,6 +2224,22 @@ const App = () => {
                                 </div>
                             </div>
                         )}
+                        <div style={{display:'flex',alignItems:'center',gap:'0.75rem',margin:'0.75rem 0'}}>
+                            <span style={{fontSize:'0.9rem',fontWeight:'600',color:'var(--text-secondary)'}}>Qty:</span>
+                            <div style={{display:'flex',alignItems:'center',border:'1.5px solid var(--border-color)',borderRadius:'8px',overflow:'hidden'}}>
+                                <button type="button"
+                                    onClick={() => setProductQty(q => Math.max(1, q - 1))}
+                                    style={{width:'36px',height:'36px',border:'none',background:'var(--card-bg)',fontSize:'1.2rem',cursor:'pointer',color:'var(--text-primary)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                    −
+                                </button>
+                                <span style={{minWidth:'36px',textAlign:'center',fontWeight:'700',fontSize:'1rem',padding:'0 0.5rem'}}>{productQty}</span>
+                                <button type="button"
+                                    onClick={() => setProductQty(q => q + 1)}
+                                    style={{width:'36px',height:'36px',border:'none',background:'var(--card-bg)',fontSize:'1.2rem',cursor:'pointer',color:'var(--accent-color)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                    +
+                                </button>
+                            </div>
+                        </div>
                         <div className="action-buttons">
                             <button className="btn btn-cart" onClick={handleAddToCart}>
                                 <Icon name="shopping-cart" size="18" /> Add to Cart
@@ -2561,9 +2585,19 @@ const App = () => {
                                     <img src={item.image} className="admin-product-img" alt={item.title} style={{ width: '80px', height: '80px' }} />
                                     <div className="admin-product-info">
                                         <div style={{ fontWeight: '500', fontSize: '1rem', marginBottom: '0.25rem' }}>{item.title}</div>
-                                        <div style={{ color: 'var(--accent-color)', fontSize: '1.1rem', fontWeight: '600' }}>{item.price}</div>
-                                        <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-                                            Quantity: {item.qty}
+                                        <div style={{ color: 'var(--accent-color)', fontSize: '1.1rem', fontWeight: '600' }}>₹{String(item.price||'').replace(/[^0-9.]/g,'')}</div>
+                                        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', marginTop:'0.6rem' }}>
+                                            <button type="button"
+                                                onClick={() => handleUpdateCartQty(item.id, -1)}
+                                                style={{width:'30px',height:'30px',border:'1.5px solid var(--border-color)',borderRadius:'6px',background:'var(--card-bg)',fontSize:'1.1rem',cursor:'pointer',color:'var(--text-primary)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                                −
+                                            </button>
+                                            <span style={{fontWeight:'700',fontSize:'1rem',minWidth:'24px',textAlign:'center'}}>{item.qty}</span>
+                                            <button type="button"
+                                                onClick={() => handleUpdateCartQty(item.id, 1)}
+                                                style={{width:'30px',height:'30px',border:'1.5px solid var(--border-color)',borderRadius:'6px',background:'var(--card-bg)',fontSize:'1.1rem',cursor:'pointer',color:'var(--accent-color)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                                +
+                                            </button>
                                         </div>
                                     </div>
                                     <div className="admin-product-actions">
@@ -2593,7 +2627,7 @@ const App = () => {
     };
 
     const renderCheckout = () => {
-        const itemsToCheckout = checkoutMode === 'single' ? (selectedProduct ? [{ ...selectedProduct, qty: 1 }] : []) : cart;
+        const itemsToCheckout = checkoutMode === 'single' ? (selectedProduct ? [{ ...selectedProduct, qty: productQty || 1 }] : []) : cart;
         if (itemsToCheckout.length === 0) return null;
 
         const orderTotal = itemsToCheckout.reduce((total, item) => {
