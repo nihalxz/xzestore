@@ -887,6 +887,23 @@ const App = () => {
             });
             showToast("Return requested successfully");
 
+            // Send return data to Google Sheets
+            fetch("https://script.google.com/macros/s/AKfycbwpPGzU_hDD3vN_lkrbc8_m6SAJ5_HCxGowzHczg_ZDjIJWPMw8T7gKPr1VTOtGTxAU/exec", {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "return",
+                    orderId: order.orderId,
+                    name: order.name,
+                    phone: order.phone,
+                    email: order.email || "",
+                    products: order.products,
+                    total: order.total,
+                    reason: reason || "No reason provided"
+                })
+            }).catch(e => console.error("Sheet return error:", e));
+
             // Open WhatsApp Message for return
             const returnMessage = `*Return Requested!*\n\n*Order ID:* ${order.orderId}\n*Customer:* ${order.name}\n*Reason:* ${reason || "No reason provided"}\n\n_The customer has requested to return their order._`;
             const encodedMessage = encodeURIComponent(returnMessage);
