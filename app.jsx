@@ -850,7 +850,16 @@ const App = () => {
         if (reason === null) return false; // User clicked cancel on the prompt
 
         try {
-            await db.collection('orders').doc(order.id).update({
+            let docId = order.id;
+            if (!docId) {
+                const snap = await db.collection('orders').where('orderId', '==', order.orderId).limit(1).get();
+                if (!snap.empty) docId = snap.docs[0].id;
+            }
+            if (!docId) {
+                showToast("Order not found in database. Please try again.");
+                return false;
+            }
+            await db.collection('orders').doc(docId).update({
                 status: 'Cancellation Requested',
                 cancellationReason: reason || "No reason provided"
             });
@@ -881,7 +890,17 @@ const App = () => {
         if (reason === null) return false; // User clicked cancel on the prompt
 
         try {
-            await db.collection('orders').doc(order.id).update({
+            // Find Firestore doc ID: prefer order.id, else query by orderId
+            let docId = order.id;
+            if (!docId) {
+                const snap = await db.collection('orders').where('orderId', '==', order.orderId).limit(1).get();
+                if (!snap.empty) docId = snap.docs[0].id;
+            }
+            if (!docId) {
+                showToast("Order not found in database. Please try again.");
+                return false;
+            }
+            await db.collection('orders').doc(docId).update({
                 status: 'Return Requested',
                 returnReason: reason || "No reason provided"
             });
@@ -1140,9 +1159,9 @@ const App = () => {
         const generatedId = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
         setOrderId(generatedId);
 
-        const itemsToCheckout = checkoutMode === 'single' ? [ { ...selectedProduct, qty: 1 } ] : cart;
+        const itemsToCheckout = checkoutMode === 'single' ? [ { ...selectedProduct, qty: productQty || 1 } ] : cart;
         const orderTotal = itemsToCheckout.reduce((total, item) => {
-            const priceVal = parseInt(item.price.replace(/[^\d]/g, ''), 10) || 0;
+            const priceVal = parseInt(String(item.price||'0').replace(/[^\d]/g, ''), 10) || 0;
             return total + (priceVal * item.qty);
         }, 0);
 
@@ -2583,7 +2602,7 @@ const App = () => {
 
     const renderCart = () => {
         const cartTotal = cart.reduce((total, item) => {
-            const priceVal = parseInt(item.price.replace(/[^\d]/g, ''), 10) || 0;
+            const priceVal = parseInt(String(item.price||'0').replace(/[^\d]/g, ''), 10) || 0;
             return total + (priceVal * item.qty);
         }, 0);
 
@@ -2655,7 +2674,7 @@ const App = () => {
         if (itemsToCheckout.length === 0) return null;
 
         const orderTotal = itemsToCheckout.reduce((total, item) => {
-            const priceVal = parseInt(item.price.replace(/[^\d]/g, ''), 10) || 0;
+            const priceVal = parseInt(String(item.price||'0').replace(/[^\d]/g, ''), 10) || 0;
             return total + (priceVal * item.qty);
         }, 0);
 
@@ -3308,7 +3327,15 @@ const MyOrdersView = ({
                                 </button>
                             )}
                             {selectedOrderDetails.status === 'Delivered' &&
-                             (!selectedOrderDetails.deliveredAt || ((new Date().getTime() - new Date(selectedOrderDetails.deliveredAt).getTime()) / (1000 * 3600 * 24) <= 7)) && (
+                             (() => {
+                                 if (!selectedOrderDetails.deliveredAt) return true;
+                                 let d = selectedOrderDetails.deliveredAt;
+                                 if (d.toDate) d = d.toDate();
+                                 else if (d.seconds) d = new Date(d.seconds * 1000);
+                                 else d = new Date(d);
+                                 if (isNaN(d.getTime())) return true;
+                                 return (new Date().getTime() - d.getTime()) / (1000 * 3600 * 24) <= 7;
+                             })() && (
                                 <button
                                     style={{background: 'none', border: '1px solid #eab308', color: '#eab308', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer', marginLeft: '0.5rem'}}
                                     onClick={async () => {
