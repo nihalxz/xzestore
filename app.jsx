@@ -2931,6 +2931,7 @@ const App = () => {
                         setSelectedProduct={setSelectedProduct}
                         setCanUserReview={setCanUserReview}
                         setReviewReturnView={setReviewReturnView}
+                        checkIsProductPurchased={checkIsProductPurchased}
                     />
                 )}
             </main>
@@ -3000,7 +3001,8 @@ const MyOrdersView = ({
     products,
     setSelectedProduct,
     setCanUserReview,
-    setReviewReturnView
+    setReviewReturnView,
+    checkIsProductPurchased
 }) => {
     const [orders, setOrders] = React.useState(null);
     const [selectedOrderDetails, setSelectedOrderDetails] = React.useState(null);
@@ -3162,7 +3164,7 @@ const MyOrdersView = ({
                             {parsedOrderItems && parsedOrderItems.length > 0 ? (
                                 parsedOrderItems.map((item, idx) => {
                                     const prodImg = (item.product && item.product.image) || (item.product && item.product.images && item.product.images[0]) || 'logo.jpg';
-                                    const canReviewThis = checkIsProductPurchased ? checkIsProductPurchased(item.product.id, item.title) : true;
+                                    const canReviewThis = typeof checkIsProductPurchased === 'function' ? checkIsProductPurchased(item.product.id, item.title) : true;
 
                                     return (
                                         <div key={idx} style={{
@@ -3256,8 +3258,22 @@ const MyOrdersView = ({
                                     let progressIndex = statusMap[currentStatus] !== undefined ? statusMap[currentStatus] : 0;
                                     if (isCancelled) progressIndex = 0;
 
+                                    const formatStepDate = (d) => {
+                                        if (!d) return null;
+                                        try {
+                                            let dateObj;
+                                            if (d && typeof d.toDate === 'function') dateObj = d.toDate();
+                                            else if (d && d.seconds) dateObj = new Date(d.seconds * 1000);
+                                            else dateObj = new Date(d);
+                                            if (isNaN(dateObj.getTime())) return null;
+                                            return dateObj.toLocaleString();
+                                        } catch (e) {
+                                            return null;
+                                        }
+                                    };
+
                                     const steps = [
-                                        { title: 'Order Confirmed', desc: 'Your order has been placed.', date: selectedOrderDetails.date },
+                                        { title: 'Order Confirmed', desc: 'Your order has been placed.', date: selectedOrderDetails.date || selectedOrderDetails.timestamp },
                                         { title: 'Shipped', desc: 'Seller has processed and shipped your order.', date: selectedOrderDetails.shippedAt || '' },
                                         { title: 'Out For Delivery', desc: 'Your item is out for delivery.', date: selectedOrderDetails.outForDeliveryAt || '' },
                                         { title: 'Delivered', desc: 'Your item has been delivered.', date: selectedOrderDetails.deliveredAt || '' }
@@ -3292,8 +3308,8 @@ const MyOrdersView = ({
                                                             {(isCompleted || isActive || isCancelled) && (
                                                                 <div className="tracking-step-desc">{isCancelled && idx === 0 ? 'Order was cancelled or returned.' : step.desc}</div>
                                                             )}
-                                                            {(isCompleted || isActive) && step.date && (
-                                                                <div className="tracking-step-date">{new Date(step.date).toLocaleString()}</div>
+                                                            {(isCompleted || isActive) && formatStepDate(step.date) && (
+                                                                <div className="tracking-step-date">{formatStepDate(step.date)}</div>
                                                             )}
                                                         </div>
                                                     </div>
