@@ -1437,19 +1437,31 @@ const App = () => {
                             </div>
                             <div className="form-grid" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))'}}>
                                 <div className="form-group">
-                                    <label className="form-label">Selling Price (₹)</label>
-                                    <input type="text" className="form-input" required placeholder="e.g. 500"
-                                        value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} />
+                                    <label className="form-label">Selling Price</label>
+                                    <div style={{position:'relative'}}>
+                                        <span style={{position:'absolute',left:'0.75rem',top:'50%',transform:'translateY(-50%)',color:'var(--text-secondary)',pointerEvents:'none',fontWeight:'600'}}>₹</span>
+                                        <input type="text" className="form-input" required placeholder="e.g. 500"
+                                            style={{paddingLeft:'1.75rem'}}
+                                            value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value.replace(/[^0-9.]/g,'')})} />
+                                    </div>
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label">Wholesale / Cost (₹)</label>
-                                    <input type="text" className="form-input" placeholder="e.g. 350"
-                                        value={newProduct.wholesalePrice || ""} onChange={e => setNewProduct({...newProduct, wholesalePrice: e.target.value})} />
+                                    <label className="form-label">Wholesale / Cost</label>
+                                    <div style={{position:'relative'}}>
+                                        <span style={{position:'absolute',left:'0.75rem',top:'50%',transform:'translateY(-50%)',color:'var(--text-secondary)',pointerEvents:'none',fontWeight:'600'}}>₹</span>
+                                        <input type="text" className="form-input" placeholder="e.g. 350"
+                                            style={{paddingLeft:'1.75rem'}}
+                                            value={newProduct.wholesalePrice || ""} onChange={e => setNewProduct({...newProduct, wholesalePrice: e.target.value.replace(/[^0-9.]/g,'')})} />
+                                    </div>
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label">MRP (₹)</label>
-                                    <input type="text" className="form-input" placeholder="e.g. 999"
-                                        value={newProduct.mrp} onChange={e => setNewProduct({...newProduct, mrp: e.target.value})} />
+                                    <label className="form-label">MRP</label>
+                                    <div style={{position:'relative'}}>
+                                        <span style={{position:'absolute',left:'0.75rem',top:'50%',transform:'translateY(-50%)',color:'var(--text-secondary)',pointerEvents:'none',fontWeight:'600'}}>₹</span>
+                                        <input type="text" className="form-input" placeholder="e.g. 999"
+                                            style={{paddingLeft:'1.75rem'}}
+                                            value={newProduct.mrp} onChange={e => setNewProduct({...newProduct, mrp: e.target.value.replace(/[^0-9.]/g,'')})} />
+                                    </div>
                                 </div>
                             </div>
                             {(() => {
@@ -1548,7 +1560,7 @@ const App = () => {
                                         <div className="admin-product-info">
                                             <div style={{fontWeight: '500', fontSize: '0.9rem', marginBottom: '0.25rem', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden'}}>{prod.title}</div>
                                             <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap'}}>
-                                                <span style={{color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '600'}}>Sell: {prod.price}</span>
+                                                <span style={{color: 'var(--accent-color)', fontSize: '0.9rem', fontWeight: '600'}}>Sell: ₹{String(prod.price||'').replace(/[^0-9.]/g,'')}</span>
                                                 {prod.wholesalePrice && (
                                                     <span style={{color: 'var(--text-secondary)', fontSize: '0.8rem'}}>Cost: ₹{prod.wholesalePrice}</span>
                                                 )}
@@ -2106,8 +2118,8 @@ const App = () => {
                                         <span className="rating-count">({ratingData.reviews})</span>
                                     </div>
                                     <div className="price-container">
-                                        <span className="card-price">{prod.price}</span>
-                                        {hasDiscount && <span className="mrp-price">{prod.mrp}</span>}
+                                        <span className="card-price">₹{String(prod.price||'').replace(/[^0-9.]/g,'')}</span>
+                                        {hasDiscount && <span className="mrp-price">₹{String(prod.mrp||'').replace(/[^0-9.]/g,'')}</span>}
                                         {hasDiscount && <span className="discount-text">{discountPercent}% off</span>}
                                     </div>
                                 </div>
@@ -2274,8 +2286,8 @@ const App = () => {
                         </div>
                         <div className="divider"></div>
                         <div style={{display: 'flex', alignItems: 'baseline', gap: '1rem', margin: '0.5rem 0'}}>
-                            <span className="price-large">{selectedProduct.price}</span>
-                            {selectedProduct.mrp && <span className="mrp-price" style={{fontSize: '1.1rem'}}>{selectedProduct.mrp}</span>}
+                            <span className="price-large">₹{String(selectedProduct.price||'').replace(/[^0-9.]/g,'')}</span>
+                            {selectedProduct.mrp && <span className="mrp-price" style={{fontSize: '1.1rem'}}>₹{String(selectedProduct.mrp||'').replace(/[^0-9.]/g,'')}</span>}
                         </div>
                         <div style={{color: 'var(--success-color)', fontSize: '0.9rem', fontWeight: '500'}}>Inclusive of all taxes</div>
 
